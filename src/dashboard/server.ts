@@ -95,7 +95,18 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 export function startDashboard(): void {
-  app.listen(config.dashboardPort, () => {
+  const server = app.listen(config.dashboardPort, () => {
     logger.info(`[dashboard] Listening on http://localhost:${config.dashboardPort}`);
+  });
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      logger.warn(
+        `[dashboard] Port ${config.dashboardPort} already in use — dashboard disabled. ` +
+        `Change DASHBOARD_PORT in .env to use a different port.`
+      );
+    } else {
+      logger.error('[dashboard] Server error:', err);
+    }
   });
 }
