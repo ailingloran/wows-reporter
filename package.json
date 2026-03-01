@@ -1,0 +1,32 @@
+{
+  "name": "wows-reporter",
+  "version": "1.0.0",
+  "description": "WoWS Discord Reporting Pack Generator — automated daily & monthly community stats bot",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "seed": "node dist/index.js --seed",
+    "test-daily": "node dist/index.js --test-daily",
+    "test-monthly": "node dist/index.js --test-monthly",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "better-sqlite3": "^9.6.0",
+    "discord.js": "^14.15.0",
+    "dotenv": "^16.4.0",
+    "express": "^4.19.0",
+    "node-cron": "^3.0.0",
+    "winston": "^3.13.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/express": "^4.17.0",
+    "@types/node": "^20.0.0",
+    "@types/node-cron": "^3.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.4.0"
+  }
+}

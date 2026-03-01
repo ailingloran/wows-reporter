@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WoWS Community Reporter — Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: #0f1015; color: #e2e8f0; }
+    header { background: #1a1d27; padding: 1rem 2rem; display: flex; align-items: center; gap: 1rem; border-bottom: 2px solid #2E6DB4; }
+    header h1 { font-size: 1.4rem; color: #60a5fa; }
+    header span { color: #94a3b8; font-size: 0.85rem; }
+    main { max-width: 1200px; margin: 0 auto; padding: 2rem 1rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+    .card { background: #1a1d27; border-radius: 8px; padding: 1.25rem; border: 1px solid #2d3748; }
+    .card h3 { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+    .card .value { font-size: 2rem; font-weight: 700; color: #f0f4f8; }
+    .card .delta { font-size: 0.85rem; margin-top: 0.25rem; }
+    .delta.up { color: #4ade80; }
+    .delta.down { color: #f87171; }
+    .chart-section { background: #1a1d27; border-radius: 8px; padding: 1.5rem; border: 1px solid #2d3748; margin-bottom: 1.5rem; }
+    .chart-section h2 { font-size: 1rem; color: #60a5fa; margin-bottom: 1rem; }
+    canvas { max-height: 300px; }
+    .loading { color: #94a3b8; text-align: center; padding: 2rem; }
+    footer { text-align: center; color: #4a5568; font-size: 0.8rem; padding: 2rem; }
+    nav { display: flex; gap: 1rem; padding: 1rem 2rem; background: #151720; border-bottom: 1px solid #2d3748; flex-wrap: wrap; }
+    nav a { color: #94a3b8; text-decoration: none; font-size: 0.9rem; padding: 0.4rem 0.8rem; border-radius: 4px; }
+    nav a:hover, nav a.active { background: #2E6DB4; color: #fff; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>⚓ WoWS Community Reporter</h1>
+    <span id="lastUpdated">Loading...</span>
+  </header>
+  <nav>
+    <a href="#" class="active" onclick="showSection('overview')">Overview</a>
+    <a href="#" onclick="showSection('daily')">Daily</a>
+    <a href="#" onclick="showSection('monthly')">Monthly</a>
+    <a href="#" onclick="showSection('players')">@Player Role</a>
+    <a href="#" onclick="showSection('channels')">Channels</a>
+  </nav>
+  <main>
+    <!-- Stat Cards -->
+    <div class="grid" id="statCards">
+      <div class="card"><h3>Messages (Today)</h3><div class="value" id="cardMessages">—</div><div class="delta" id="cardMessagesDelta"></div></div>
+      <div class="card"><h3>Active Members</h3><div class="value" id="cardActive">—</div><div class="delta" id="cardActiveDelta"></div></div>
+      <div class="card"><h3>Joins</h3><div class="value" id="cardJoins">—</div></div>
+      <div class="card"><h3>Leaves</h3><div class="value" id="cardLeaves">—</div></div>
+      <div class="card"><h3>@Player Role</h3><div class="value" id="cardPlayer">—</div><div class="delta" id="cardPlayerDelta"></div></div>
+    </div>
+
+    <!-- Charts -->
+    <div class="chart-section">
+      <h2>📨 Daily Messages (Last 30 Days)</h2>
+      <canvas id="chartMessages"></canvas>
+    </div>
+    <div class="chart-section">
+      <h2>⚓ @Player Role Growth</h2>
+      <canvas id="chartPlayers"></canvas>
+    </div>
+    <div class="chart-section">
+      <h2>👥 Daily Joins & Leaves</h2>
+      <canvas id="chartJoinsLeaves"></canvas>
+    </div>
+  </main>
+  <footer>WoWS Community Reporter · Auto-generated</footer>
+
+  <script>
+    const chartDefaults = {
+      responsive: true,
+      plugins: { legend: { labels: { color: '#94a3b8' } } },
+      scales: {
+        x: { ticks: { color: '#94a3b8' }, grid: { color: '#2d3748' } },
+        y: { ticks: { color: '#94a3b8' }, grid: { color: '#2d3748' } },
+      },
+    };
+
+    function fmt(n) { return n != null ? n.toLocaleString() : 'N/A'; }
+    function delta(cur, prev) {
+      if (cur == null || prev == null) return '';
+      const d = cur - prev;
+      return (d >= 0 ? '▲ +' : '▼ ') + fmt(d);
+    }
+    function deltaClass(cur, prev) { return cur >= prev ? 'up' : 'down'; }
+
+    async function loadDashboard() {
+      const [daily, players] = await Promise.all([
+        fetch('/api/daily').then(r => r.json()),
+        fetch('/api/players').then(r => r.json()),
+      ]);
+
+      document.getElementById('lastUpdated').textContent =
+        'Last updated: ' + new Date().toLocaleString();
+
+      if (daily.length > 0) {
+        const latest = daily[daily.length - 1];
+        const prev   = daily.length > 1 ? daily[daily.length - 2] : null;
+
+        document.getElementById('cardMessages').textContent = fmt(latest.messages);
+        document.getElementById('cardActive').textContent   = fmt(latest.active_members);
+        document.getElementById('cardJoins').textContent    = fmt(latest.joins);
+        document.getElementById('cardLeaves').textContent   = fmt(latest.leaves);
+        document.getElementById('cardPlayer').textContent   = fmt(latest.player_role_count);
+
+        if (prev) {
+          const md = document.getElementById('cardMessagesDelta');
+          md.textContent = delta(latest.messages, prev.messages);
+          md.className = 'delta ' + deltaClass(latest.messages, prev.messages);
+
+          const ad = document.getElementById('cardActiveDelta');
+          ad.textContent = delta(latest.active_members, prev.active_members);
+          ad.className = 'delta ' + deltaClass(latest.active_members, prev.active_members);
+
+          const pd = document.getElementById('cardPlayerDelta');
+          pd.textContent = delta(latest.player_role_count, prev.player_role_count);
+          pd.className = 'delta ' + deltaClass(latest.player_role_count, prev.player_role_count);
+        }
+
+        // Messages chart
+        new Chart(document.getElementById('chartMessages'), {
+          type: 'line',
+          data: {
+            labels: daily.map(r => r.taken_at.slice(0, 10)),
+            datasets: [{
+              label: 'Messages',
+              data: daily.map(r => r.messages),
+              borderColor: '#2E6DB4',
+              backgroundColor: 'rgba(46,109,180,0.15)',
+              fill: true,
+              tension: 0.3,
+            }],
+          },
+          options: chartDefaults,
+        });
+
+        // Joins & Leaves chart
+        new Chart(document.getElementById('chartJoinsLeaves'), {
+          type: 'bar',
+          data: {
+            labels: daily.map(r => r.taken_at.slice(0, 10)),
+            datasets: [
+              { label: 'Joins',  data: daily.map(r => r.joins),  backgroundColor: '#4ade80' },
+              { label: 'Leaves', data: daily.map(r => r.leaves), backgroundColor: '#f87171' },
+            ],
+          },
+          options: chartDefaults,
+        });
+      }
+
+      // @Player role chart
+      if (players.length > 0) {
+        new Chart(document.getElementById('chartPlayers'), {
+          type: 'line',
+          data: {
+            labels: players.map(r => r.snapshot_date),
+            datasets: [{
+              label: '@Player Role Count',
+              data: players.map(r => r.total_count),
+              borderColor: '#f59e0b',
+              backgroundColor: 'rgba(245,158,11,0.15)',
+              fill: true,
+              tension: 0.3,
+            }],
+          },
+          options: chartDefaults,
+        });
+      }
+    }
+
+    function showSection(section) {
+      document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+      event.target.classList.add('active');
+    }
+
+    loadDashboard();
+  </script>
+</body>
+</html>
