@@ -4,7 +4,7 @@
   "description": "WoWS Discord Reporting Pack Generator — automated daily & monthly community stats bot",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && cp src/store/schema.sql dist/store/schema.sql",
     "dev": "ts-node src/index.ts",
     "start": "node dist/index.js",
     "seed": "node dist/index.js --seed",

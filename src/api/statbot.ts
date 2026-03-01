@@ -1,7 +1,7 @@
 /**
- * Statbot REST API wrapper.
- * All calls use Bearer auth. Returns null on 404/plan-unavailable endpoints
- * so the report builder can degrade gracefully.
+ * Statbot REST API wrapper — updated to match current API (v1).
+ * All time params use Unix timestamps in milliseconds (not ISO strings).
+ * Returns null on 404/403 so the report builder can degrade gracefully.
  */
 
 import axios, { AxiosInstance } from 'axios';
@@ -16,13 +16,14 @@ const client: AxiosInstance = axios.create({
   timeout: 15_000,
 });
 
-// ── Helper ───────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
-function toIso(d: Date): string {
-  return d.toISOString();
+/** Convert a Date to Unix timestamp in milliseconds (what Statbot expects). */
+function toMs(d: Date): number {
+  return d.getTime();
 }
 
-async function safeGet<T>(url: string, params: Record<string, string>): Promise<T | null> {
+async function safeGet<T>(url: string, params: Record<string, any>): Promise<T | null> {
   try {
     const { data } = await client.get<T>(url, { params });
     return data;
@@ -37,40 +38,64 @@ async function safeGet<T>(url: string, params: Record<string, string>): Promise<
   }
 }
 
+// ── Internal types ────────────────────────────────────────────────────────────
+
+interface MemberCountPoint {
+  unixTimestamp: number;
+  count:         number;
+  joins:         number;
+  leaves:        number;
+}
+
 // ── Exported API Functions ───────────────────────────────────────────────────
 
 const GID = config.statbotGuildId;
 
 /** Total messages in the given time window. */
 export async function getMessages(from: Date, to: Date): Promise<{ count: number } | null> {
-  return safeGet(`/guilds/${GID}/messages`, {
-    from: toIso(from),
-    to:   toIso(to),
+  return safeGet(`/guilds/${GID}/messages/sums`, {
+    start: toMs(from),
+    end:   toMs(to),
   });
 }
 
-/** Unique active members in the given time window. */
+/**
+ * Unique active members in the given time window.
+ * Uses /counts/members which returns one entry per active member — we count the array length.
+ */
 export async function getActiveMembers(from: Date, to: Date): Promise<{ count: number } | null> {
-  return safeGet(`/guilds/${GID}/members/active`, {
-    from: toIso(from),
-    to:   toIso(to),
+  const data = await safeGet<any[]>(`/guilds/${GID}/counts/members`, {
+    start: toMs(from),
+    end:   toMs(to),
+  });
+  if (data === null) return null;
+  return { count: data.length };
+}
+
+/**
+ * Fetch member count series which contains joins + leaves per day.
+ * Both getJoins and getLeaves share this endpoint.
+ */
+async function getMemberCountSeries(from: Date, to: Date): Promise<MemberCountPoint[] | null> {
+  return safeGet<MemberCountPoint[]>(`/guilds/${GID}/membercounts/series`, {
+    start:    toMs(from),
+    end:      toMs(to),
+    interval: 'day',
   });
 }
 
 /** Number of members who joined in the given window. */
 export async function getJoins(from: Date, to: Date): Promise<{ count: number } | null> {
-  return safeGet(`/guilds/${GID}/members/joins`, {
-    from: toIso(from),
-    to:   toIso(to),
-  });
+  const series = await getMemberCountSeries(from, to);
+  if (series === null) return null;
+  return { count: series.reduce((sum, p) => sum + (p.joins ?? 0), 0) };
 }
 
 /** Number of members who left in the given window. */
 export async function getLeaves(from: Date, to: Date): Promise<{ count: number } | null> {
-  return safeGet(`/guilds/${GID}/members/leaves`, {
-    from: toIso(from),
-    to:   toIso(to),
-  });
+  const series = await getMemberCountSeries(from, to);
+  if (series === null) return null;
+  return { count: series.reduce((sum, p) => sum + (p.leaves ?? 0), 0) };
 }
 
 export interface ChannelStat {
@@ -79,12 +104,23 @@ export interface ChannelStat {
   messageCount: number;
 }
 
-/** Per-channel message breakdown for the given window. */
+/**
+ * Top channels by message count for the given window.
+ * Uses /messages/tops/channels with full=true to get channel id + name.
+ */
 export async function getChannelStats(from: Date, to: Date): Promise<ChannelStat[] | null> {
-  return safeGet(`/guilds/${GID}/channels`, {
-    from: toIso(from),
-    to:   toIso(to),
+  const data = await safeGet<any[]>(`/guilds/${GID}/messages/tops/channels`, {
+    start: toMs(from),
+    end:   toMs(to),
+    full:  true,
+    limit: 10,
   });
+  if (data === null) return null;
+  return data.map(ch => ({
+    channelId:    String(ch.id ?? ch.channelId ?? ch.rank),
+    name:         ch.name ?? ch.channelName ?? `Channel #${ch.rank}`,
+    messageCount: ch.count ?? ch.messageCount ?? 0,
+  }));
 }
 
 export interface ThreadStat {
@@ -93,12 +129,9 @@ export interface ThreadStat {
   messageCount: number;
 }
 
-/** Per-thread message breakdown (may return null if not on your plan). */
-export async function getThreadStats(from: Date, to: Date): Promise<ThreadStat[] | null> {
-  return safeGet(`/guilds/${GID}/threads`, {
-    from: toIso(from),
-    to:   toIso(to),
-  });
+/** Thread stats — not available in current Statbot API, skipped gracefully. */
+export async function getThreadStats(_from: Date, _to: Date): Promise<ThreadStat[] | null> {
+  return null;
 }
 
 export interface KeywordResult {
@@ -106,10 +139,7 @@ export interface KeywordResult {
   count:   number;
 }
 
-/** Keyword frequency data (may return null if not on your plan). */
-export async function getKeywords(from: Date, to: Date): Promise<KeywordResult[] | null> {
-  return safeGet(`/guilds/${GID}/keywords`, {
-    from: toIso(from),
-    to:   toIso(to),
-  });
+/** Keyword data — not available in current Statbot API, skipped gracefully. */
+export async function getKeywords(_from: Date, _to: Date): Promise<KeywordResult[] | null> {
+  return null;
 }
