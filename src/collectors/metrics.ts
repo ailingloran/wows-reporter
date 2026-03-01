@@ -97,17 +97,29 @@ export async function collectMetrics(
 
 /** Returns [start, end] for yesterday (calendar day in UTC). */
 export function yesterdayWindow(): [Date, Date] {
-  const now  = new Date();
-  const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 1));
-  const to   = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - 1);
+  // Use Europe/Berlin calendar date to match the cron timezone.
+  // The cron fires at 00:00 CET = 23:00 UTC, so UTC date is still the previous day —
+  // using UTC directly would give the wrong day. Berlin date gives the correct result.
+  const berlinDateStr = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date()); // e.g. "2026-03-02"
+  const [y, m, d] = berlinDateStr.split('-').map(Number);
+  const from = new Date(Date.UTC(y, m - 1, d - 1));
+  const to   = new Date(Date.UTC(y, m - 1, d) - 1);
   return [from, to];
 }
 
-/** Returns [start, end] for the previous calendar month in UTC. */
+/** Returns [start, end] for the previous calendar month in Europe/Berlin timezone. */
 export function lastMonthWindow(): [Date, Date] {
-  const now   = new Date();
-  const year  = now.getUTCMonth() === 0 ? now.getUTCFullYear() - 1 : now.getUTCFullYear();
-  const month = now.getUTCMonth() === 0 ? 11 : now.getUTCMonth() - 1;
+  // Same timezone fix as yesterdayWindow — use Berlin date, not UTC date.
+  const berlinDateStr = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date()); // e.g. "2026-04-01"
+  const [y, m] = berlinDateStr.split('-').map(Number); // m is 1-indexed
+  const year  = m === 1 ? y - 1 : y;
+  const month = m === 1 ? 11 : m - 2; // 0-indexed, one month back
   const from  = new Date(Date.UTC(year, month, 1));
   const to    = new Date(Date.UTC(year, month + 1, 1) - 1);
   return [from, to];
