@@ -8,7 +8,7 @@
  * A safety cap of 2000 messages per source prevents runaway API calls.
  */
 
-import { ChannelType, Collection, Message, TextChannel, AnyThreadChannel, GuildForumChannel } from 'discord.js';
+import { ChannelType, Collection, Message, TextChannel, AnyThreadChannel } from 'discord.js';
 import { getDiscordClient } from '../api/discord';
 import { logger } from '../logger';
 
@@ -57,7 +57,7 @@ async function readMessagesFrom(channel: TextChannel | AnyThreadChannel, cutoff:
  * Collect messages from all threads in a forum channel that had activity
  * in the last 24 hours (active threads + recently archived threads).
  */
-async function readForumChannel(forum: GuildForumChannel, cutoff: number): Promise<string[]> {
+async function readForumChannel(forum: any, cutoff: number): Promise<string[]> {
   const results: string[] = [];
 
   // 1. Active threads (all open posts, regardless of age)
@@ -78,7 +78,7 @@ async function readForumChannel(forum: GuildForumChannel, cutoff: number): Promi
   try {
     const { threads: archivedThreads } = await forum.threads.fetchArchived({ limit: 100 });
     const recentArchived = archivedThreads.filter(
-      t => (t.archiveTimestamp ?? 0) >= cutoff,
+      (t: AnyThreadChannel) => (t.archiveTimestamp ?? 0) >= cutoff,
     );
     logger.debug(`[messageCollector] Forum ${forum.id}: ${recentArchived.size} recently archived thread(s)`);
 
@@ -121,7 +121,7 @@ export async function collectRecentMessages(channelIds: string[]): Promise<strin
 
       if (channel.type === ChannelType.GuildForum) {
         // Forum channel — collect from all threads
-        msgs = await readForumChannel(channel as GuildForumChannel, cutoff);
+        msgs = await readForumChannel(channel, cutoff);
         logger.debug(`[messageCollector] Forum ${channelId}: ${msgs.length} messages total (last 24h)`);
       } else if (channel.isTextBased()) {
         // Regular text channel
