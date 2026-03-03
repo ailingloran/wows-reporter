@@ -41,9 +41,8 @@ export const config = {
   logLevel: process.env.LOG_LEVEL || 'info',
 
   // Community Pulse (OpenAI sentiment analysis)
-  openAiApiKey:               process.env.OPENAI_API_KEY || '',
-  sentimentChannelIds:        (process.env.SENTIMENT_CHANNEL_IDS || '').split(',').filter(Boolean),
-  sentimentMessageLimit:      parseInt(process.env.SENTIMENT_MESSAGE_LIMIT || '150', 10),
+  openAiApiKey:        process.env.OPENAI_API_KEY || '',
+  sentimentChannelIds: (process.env.SENTIMENT_CHANNEL_IDS || '').split(',').filter(Boolean),
 };
 
 // ── Keyword Buckets ───────────────────────────────────────────────────────────

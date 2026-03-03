@@ -27,11 +27,8 @@ export async function runSentimentReport(): Promise<void> {
 
   logger.info('[sentiment] Starting Community Pulse report...');
 
-  // ── Collect messages ───────────────────────────────────────────────────────
-  const messages = await collectRecentMessages(
-    config.sentimentChannelIds,
-    config.sentimentMessageLimit,
-  );
+  // ── Collect messages (last 24 hours) ──────────────────────────────────────
+  const messages = await collectRecentMessages(config.sentimentChannelIds);
 
   if (messages.length < 10) {
     logger.warn(`[sentiment] Only ${messages.length} messages found — not enough data, skipping`);
