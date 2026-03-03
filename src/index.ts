@@ -26,6 +26,12 @@ async function main() {
 
   const args = process.argv.slice(2);
 
+  // 3. Register slash commands (skip in one-shot CLI modes)
+  if (!args.includes('--seed') && !args.includes('--test-daily') && !args.includes('--test-monthly')) {
+    const { registerCommands } = await import('./commands/register');
+    await registerCommands();
+  }
+
   // ── Seed mode: take initial @Player role baseline snapshot ──────────────────
   if (args.includes('--seed')) {
     logger.info('Seed mode: taking @Player role baseline snapshot...');

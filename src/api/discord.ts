@@ -10,6 +10,7 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonInteraction,
+  ChatInputCommandInteraction,
   TextChannel,
   Guild,
   Collection,
@@ -45,17 +46,25 @@ export async function initDiscordClient(): Promise<Client> {
     handleMemberUpdate(oldMember, newMember);
   });
 
-  // Handle button interactions (monthly report approval)
+  // Handle interactions (buttons + slash commands)
   discordClient.on('interactionCreate', async (interaction) => {
-    if (!interaction.isButton()) return;
-    await handleButtonInteraction(interaction as ButtonInteraction);
+    if (interaction.isButton()) {
+      await handleButtonInteraction(interaction as ButtonInteraction);
+    } else if (interaction.isChatInputCommand()) {
+      await handleSlashCommand(interaction as ChatInputCommandInteraction);
+    }
   });
 
-  discordClient.once('ready', () => {
-    logger.info(`Discord bot logged in as ${discordClient.user?.tag}`);
+  // Wait for the ready event so client.user is populated before returning
+  const ready = new Promise<void>(resolve => {
+    discordClient.once('ready', () => {
+      logger.info(`Discord bot logged in as ${discordClient.user?.tag}`);
+      resolve();
+    });
   });
 
   await discordClient.login(config.discordBotToken);
+  await ready;
   return discordClient;
 }
 
@@ -116,6 +125,28 @@ async function handleButtonInteraction(interaction: ButtonInteraction): Promise<
       ephemeral: true,
     });
     logger.info(`[discord] Edit requested by ${interaction.user.tag}`);
+  }
+}
+
+// ── Slash command router ──────────────────────────────────────────────────────
+
+async function handleSlashCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  // Dynamic import avoids a circular dependency with the handlers module
+  const { handleReportDaily, handleReportMonthly, handleSnapshot, handleStatus } =
+    await import('../commands/handlers');
+
+  try {
+    if (interaction.commandName === 'report') {
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'daily')   await handleReportDaily(interaction);
+      if (sub === 'monthly') await handleReportMonthly(interaction);
+    } else if (interaction.commandName === 'snapshot') {
+      await handleSnapshot(interaction);
+    } else if (interaction.commandName === 'status') {
+      await handleStatus(interaction);
+    }
+  } catch (err) {
+    logger.error('[discord] Unhandled slash command error:', err);
   }
 }
 
