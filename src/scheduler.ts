@@ -16,9 +16,15 @@ const TZ = 'Europe/Berlin';
 
 export function registerSchedules(): void {
   // ── Daily report ────────────────────────────────────────────────────────────
+  // Snapshot the @Player role count first so the report always has fresh data.
   cron.schedule(config.dailyCron, async () => {
     logger.info('[scheduler] Daily report triggered');
     try {
+      const client = getDiscordClient();
+      const guild  = await client.guilds.fetch(config.statbotGuildId);
+      await snapshotPlayerRole(guild);
+      logger.info('[scheduler] @Player role snapshot complete');
+
       await runDailyReport();
       logger.info('[scheduler] Daily report complete');
     } catch (err) {
@@ -34,20 +40,6 @@ export function registerSchedules(): void {
       logger.info('[scheduler] Monthly report complete');
     } catch (err) {
       logger.error('[scheduler] Monthly report failed:', err);
-    }
-  }, { timezone: TZ });
-
-  // ── @Player role nightly snapshot (5 minutes after daily cron) ──────────────
-  // This runs just after the daily report so the count is fresh in the DB.
-  cron.schedule('5 0 * * *', async () => {
-    logger.info('[scheduler] @Player role snapshot triggered');
-    try {
-      const client = getDiscordClient();
-      const guild  = await client.guilds.fetch(config.statbotGuildId);
-      await snapshotPlayerRole(guild);
-      logger.info('[scheduler] @Player role snapshot complete');
-    } catch (err) {
-      logger.error('[scheduler] @Player role snapshot failed:', err);
     }
   }, { timezone: TZ });
 }
