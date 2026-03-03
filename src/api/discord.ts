@@ -132,8 +132,11 @@ async function handleButtonInteraction(interaction: ButtonInteraction): Promise<
 
 async function handleSlashCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   // Dynamic import avoids a circular dependency with the handlers module
-  const { handleReportDaily, handleReportMonthly, handleSnapshot, handleStatus } =
-    await import('../commands/handlers');
+  const {
+    handleReportDaily, handleReportMonthly,
+    handleSnapshot, handleStatus,
+    handleSentimentRun, handleSentimentStatus,
+  } = await import('../commands/handlers');
 
   try {
     if (interaction.commandName === 'report') {
@@ -144,6 +147,10 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction): Pro
       await handleSnapshot(interaction);
     } else if (interaction.commandName === 'status') {
       await handleStatus(interaction);
+    } else if (interaction.commandName === 'sentiment') {
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'run')    await handleSentimentRun(interaction);
+      if (sub === 'status') await handleSentimentStatus(interaction);
     }
   } catch (err) {
     logger.error('[discord] Unhandled slash command error:', err);

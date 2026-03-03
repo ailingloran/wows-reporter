@@ -17,11 +17,13 @@ export const config = {
   discordStaffChannelId:  requireEnv('DISCORD_STAFF_CHANNEL_ID'),
   discordMonthlyChannelId: requireEnv('DISCORD_MONTHLY_CHANNEL_ID'),
   discordPlayerRoleId:    requireEnv('DISCORD_PLAYER_ROLE_ID'),
-  discordStaffRoleIds:    (process.env.DISCORD_STAFF_ROLE_IDS || '').split(',').filter(Boolean),
+  discordStaffRoleIds:    (process.env.DISCORD_STAFF_ROLE_IDS  || '').split(',').filter(Boolean),
+  discordAdminRoleIds:    (process.env.DISCORD_ADMIN_ROLE_IDS  || '').split(',').filter(Boolean),
 
   // Scheduling
-  dailyCron:   process.env.DAILY_CRON   || '0 0 * * *',
-  monthlyCron: process.env.MONTHLY_CRON || '0 0 1 * *',
+  dailyCron:     process.env.DAILY_CRON     || '0 0 * * *',
+  monthlyCron:   process.env.MONTHLY_CRON   || '0 0 1 * *',
+  sentimentCron: process.env.SENTIMENT_CRON || '0 17 * * *',
 
   // Delivery
   dailyDelivery:   (process.env.DAILY_DELIVERY   || 'discord') as 'discord' | 'dashboard' | 'both',
@@ -37,6 +39,11 @@ export const config = {
 
   // Logging
   logLevel: process.env.LOG_LEVEL || 'info',
+
+  // Community Pulse (OpenAI sentiment analysis)
+  openAiApiKey:               process.env.OPENAI_API_KEY || '',
+  sentimentChannelIds:        (process.env.SENTIMENT_CHANNEL_IDS || '').split(',').filter(Boolean),
+  sentimentMessageLimit:      parseInt(process.env.SENTIMENT_MESSAGE_LIMIT || '150', 10),
 };
 
 // ── Keyword Buckets ───────────────────────────────────────────────────────────

@@ -130,3 +130,25 @@ export function getPlayerRoleSnapshotsBetween(from: string, to: string): Array<{
     .prepare(`SELECT * FROM player_role_snapshots WHERE snapshot_date BETWEEN ? AND ? ORDER BY snapshot_date ASC`)
     .all(from, to) as Array<{ snapshot_date: string; total_count: number }>;
 }
+
+// ── Sentiment report helpers ──────────────────────────────────────────────────
+
+export interface SentimentReportRow {
+  id:       number;
+  taken_at: string;
+  mood:     string | null;
+  raw_json: string | null;
+}
+
+export function insertSentimentReport(takenAt: string, mood: string, rawJson: string): void {
+  getDb().prepare(`
+    INSERT INTO sentiment_reports (taken_at, mood, raw_json)
+    VALUES (?, ?, ?)
+  `).run(takenAt, mood, rawJson);
+}
+
+export function getLastSentimentReport(): SentimentReportRow | undefined {
+  return getDb()
+    .prepare(`SELECT * FROM sentiment_reports ORDER BY taken_at DESC LIMIT 1`)
+    .get() as SentimentReportRow | undefined;
+}

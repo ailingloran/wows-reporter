@@ -9,27 +9,36 @@ import { logger } from '../logger';
 import { runDailyReport } from '../reports/daily';
 import { runMonthlyReport } from '../reports/monthly';
 import { snapshotPlayerRole } from '../collectors/memberTracker';
-import { getLastSnapshot, getLatestPlayerRoleSnapshot } from '../store/db';
+import { getLastSnapshot, getLatestPlayerRoleSnapshot, getLastSentimentReport } from '../store/db';
 import { getDiscordClient } from '../api/discord';
 import { formatNumber } from '../reports/formatters';
 
-// ── Permission check ──────────────────────────────────────────────────────────
+// ── Permission helpers ────────────────────────────────────────────────────────
 
+function getMemberRoleIds(interaction: ChatInputCommandInteraction): string[] {
+  if (!interaction.member) return [];
+  const roles = interaction.member.roles;
+  return Array.isArray(roles)
+    ? roles
+    : [...(interaction.member as GuildMember).roles.cache.keys()];
+}
+
+/** Staff — can use /report, /snapshot, /status */
 function isStaff(interaction: ChatInputCommandInteraction): boolean {
   if (!interaction.inGuild() || !interaction.member) return false;
-
   if (config.discordStaffRoleIds.length === 0) {
     return interaction.memberPermissions?.has('Administrator') ?? false;
   }
+  return config.discordStaffRoleIds.some(id => getMemberRoleIds(interaction).includes(id));
+}
 
-  // interaction.member.roles is either Snowflake[] (APIInteractionGuildMember)
-  // or a RoleManager (full GuildMember). Handle both.
-  const roles = interaction.member.roles;
-  const roleIds: string[] = Array.isArray(roles)
-    ? roles
-    : [...(interaction.member as GuildMember).roles.cache.keys()];
-
-  return config.discordStaffRoleIds.some(id => roleIds.includes(id));
+/** Admin — can use /sentiment */
+function isAdmin(interaction: ChatInputCommandInteraction): boolean {
+  if (!interaction.inGuild() || !interaction.member) return false;
+  if (config.discordAdminRoleIds.length === 0) {
+    return interaction.memberPermissions?.has('Administrator') ?? false;
+  }
+  return config.discordAdminRoleIds.some(id => getMemberRoleIds(interaction).includes(id));
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -111,6 +120,43 @@ export async function handleStatus(interaction: ChatInputCommandInteraction): Pr
     `📊 **Last Daily Report**: ${lastDaily ? fmt(lastDaily.taken_at) : 'Never'}`,
     `📅 **Last Monthly Report**: ${lastMonthly ? fmt(lastMonthly.taken_at) : 'Never'}`,
   ];
+
+  await interaction.reply({ content: lines.join('\n'), ephemeral: true });
+}
+
+export async function handleSentimentRun(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!isAdmin(interaction)) {
+    await interaction.reply({ content: '❌ This command requires admin permissions.', ephemeral: true });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+  logger.info(`[commands] /sentiment run triggered by ${interaction.user.tag}`);
+
+  try {
+    const { runSentimentReport } = await import('../reports/sentiment');
+    await runSentimentReport();
+    await interaction.editReply('✅ Community Pulse report generated and posted.');
+  } catch (err) {
+    logger.error('[commands] /sentiment run failed:', err);
+    await interaction.editReply('❌ Failed to generate Community Pulse report. Check the bot logs.');
+  }
+}
+
+export async function handleSentimentStatus(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (!isAdmin(interaction)) {
+    await interaction.reply({ content: '❌ This command requires admin permissions.', ephemeral: true });
+    return;
+  }
+
+  const last = getLastSentimentReport();
+  const fmt  = (isoStr: string) =>
+    new Date(isoStr).toLocaleString('en-GB', { timeZone: 'Europe/Berlin', dateStyle: 'medium', timeStyle: 'short' });
+
+  const lines = [
+    `💬 **Last Community Pulse**: ${last ? fmt(last.taken_at) : 'Never'}`,
+    last?.mood ? `🌡️ **Last mood**: ${last.mood}` : '',
+  ].filter(Boolean);
 
   await interaction.reply({ content: lines.join('\n'), ephemeral: true });
 }

@@ -37,6 +37,14 @@ CREATE TABLE IF NOT EXISTS player_role_snapshots (
   total_count   INTEGER NOT NULL
 );
 
+-- Community Pulse reports (OpenAI sentiment analysis results)
+CREATE TABLE IF NOT EXISTS sentiment_reports (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  taken_at  TEXT    NOT NULL,   -- ISO-8601 UTC timestamp
+  mood      TEXT,               -- one-sentence mood summary
+  raw_json  TEXT                -- full PulseResult as JSON
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_snapshots_period_taken
   ON snapshots(period, taken_at DESC);

@@ -42,4 +42,16 @@ export function registerSchedules(): void {
       logger.error('[scheduler] Monthly report failed:', err);
     }
   }, { timezone: TZ });
+
+  // ── Community Pulse (sentiment) report ──────────────────────────────────────
+  cron.schedule(config.sentimentCron, async () => {
+    logger.info('[scheduler] Community Pulse report triggered');
+    try {
+      const { runSentimentReport } = await import('./reports/sentiment');
+      await runSentimentReport();
+      logger.info('[scheduler] Community Pulse report complete');
+    } catch (err) {
+      logger.error('[scheduler] Community Pulse report failed:', err);
+    }
+  }, { timezone: TZ });
 }

@@ -24,6 +24,14 @@ const commandDefinitions = [
   new SlashCommandBuilder()
     .setName('status')
     .setDescription('Show bot status — last report times and current @Player role count'),
+
+  new SlashCommandBuilder()
+    .setName('sentiment')
+    .setDescription('Community Pulse — AI sentiment analysis (admin only)')
+    .addSubcommand(sub =>
+      sub.setName('run').setDescription('Trigger the Community Pulse report now'))
+    .addSubcommand(sub =>
+      sub.setName('status').setDescription('Show when the last Community Pulse report ran')),
 ];
 
 export async function registerCommands(): Promise<void> {
