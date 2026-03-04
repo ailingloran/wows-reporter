@@ -1,7 +1,7 @@
 /**
- * Optional Express web dashboard.
- * Password-protected via Basic Auth. Reads directly from SQLite.
- * Access at http://localhost:3000 (or via Nginx reverse proxy).
+ * Express web dashboard + internal REST API.
+ * Supports Basic Auth (browser) and Bearer token (Next.js dashboard calls).
+ * Reads directly from SQLite; trigger endpoints fire bot report jobs.
  */
 
 import express, { Request, Response, NextFunction } from 'express';
@@ -11,31 +11,70 @@ import { logger } from '../logger';
 import {
   getDb,
   getSnapshotsBetween,
-  getPlayerRoleSnapshotsBetween,
   getChannelStatsForSnapshot,
+  getSentimentReports,
+  getLastSnapshot,
+  getLastSentimentReport,
 } from '../store/db';
 
 const app = express();
+app.use(express.json());
 
-// ── Basic Auth middleware ──────────────────────────────────────────────────────
+// ── CORS (allow Next.js frontend) ─────────────────────────────────────────────
 app.use((req: Request, res: Response, next: NextFunction) => {
-  const auth = req.headers.authorization;
-  if (auth) {
-    const [, encoded] = auth.split(' ');
-    const decoded = Buffer.from(encoded, 'base64').toString('utf-8');
-    const [, password] = decoded.split(':');
-    if (password === config.dashboardSecret) {
-      return next();
-    }
+  const origin = req.headers.origin ?? '';
+  if (origin.startsWith('http://localhost') || origin.includes('dockworks.dev')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   }
+  if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
+  next();
+});
+
+// ── Auth middleware ────────────────────────────────────────────────────────────
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const auth = req.headers.authorization ?? '';
+
+  // Bearer token (Next.js internal API calls)
+  if (auth.startsWith('Bearer ')) {
+    if (auth.slice(7) === config.dashboardSecret) return next();
+  }
+
+  // Basic Auth (browser access)
+  if (auth.startsWith('Basic ')) {
+    const decoded  = Buffer.from(auth.slice(6), 'base64').toString('utf-8');
+    const password = decoded.split(':')[1];
+    if (password === config.dashboardSecret) return next();
+  }
+
   res.setHeader('WWW-Authenticate', 'Basic realm="WoWS Reporter Dashboard"');
-  res.status(401).send('Unauthorized');
+  res.status(401).json({ error: 'Unauthorized' });
 });
 
 // ── Static files ──────────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ── API routes (JSON) ─────────────────────────────────────────────────────────
+// ── API routes ────────────────────────────────────────────────────────────────
+
+/** Bot status — uptime + last report timestamps */
+app.get('/api/status', (_req: Request, res: Response) => {
+  try {
+    const lastDaily     = getLastSnapshot('daily');
+    const lastMonthly   = getLastSnapshot('monthly');
+    const lastSentiment = getLastSentimentReport();
+    res.json({
+      uptime:          process.uptime(),
+      lastDailyAt:     lastDaily?.taken_at     ?? null,
+      lastMonthlyAt:   lastMonthly?.taken_at   ?? null,
+      lastSentimentAt: lastSentiment?.taken_at ?? null,
+      lastMood:        lastSentiment?.mood      ?? null,
+    });
+  } catch (err) {
+    logger.error('[dashboard] /api/status error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 /** Last 30 daily snapshots */
 app.get('/api/daily', (_req: Request, res: Response) => {
@@ -74,18 +113,45 @@ app.get('/api/players', (_req: Request, res: Response) => {
   }
 });
 
-/** Channel stats for latest snapshot */
+/** Channel stats for latest daily snapshot */
 app.get('/api/channels', (_req: Request, res: Response) => {
   try {
     const latest = getDb()
       .prepare(`SELECT id FROM snapshots WHERE period = 'daily' ORDER BY taken_at DESC LIMIT 1`)
       .get() as { id: number } | undefined;
-    if (!latest) return res.json([]);
-    const channels = getChannelStatsForSnapshot(latest.id);
-    res.json(channels);
+    if (!latest) { res.json([]); return; }
+    res.json(getChannelStatsForSnapshot(latest.id));
   } catch (err) {
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+/** Last N sentiment reports (default 30, max 100) */
+app.get('/api/sentiment', (req: Request, res: Response) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 30, 100);
+    res.json(getSentimentReports(limit));
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/** Trigger daily report (fire-and-forget) */
+app.post('/api/trigger/daily', (_req: Request, res: Response) => {
+  import('../reports/daily').then(({ runDailyReport }) => {
+    runDailyReport().catch((err: unknown) =>
+      logger.error('[dashboard] Triggered daily report failed:', err));
+    res.json({ ok: true, message: 'Daily report triggered' });
+  }).catch(() => res.status(500).json({ error: 'Failed to load report module' }));
+});
+
+/** Trigger Community Pulse (fire-and-forget) */
+app.post('/api/trigger/sentiment', (_req: Request, res: Response) => {
+  import('../reports/sentiment').then(({ runSentimentReport }) => {
+    runSentimentReport().catch((err: unknown) =>
+      logger.error('[dashboard] Triggered sentiment report failed:', err));
+    res.json({ ok: true, message: 'Sentiment report triggered' });
+  }).catch(() => res.status(500).json({ error: 'Failed to load report module' }));
 });
 
 /** Health check */

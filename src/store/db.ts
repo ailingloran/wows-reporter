@@ -152,3 +152,9 @@ export function getLastSentimentReport(): SentimentReportRow | undefined {
     .prepare(`SELECT * FROM sentiment_reports ORDER BY taken_at DESC LIMIT 1`)
     .get() as SentimentReportRow | undefined;
 }
+
+export function getSentimentReports(limit = 30): SentimentReportRow[] {
+  return getDb()
+    .prepare(`SELECT * FROM sentiment_reports ORDER BY taken_at DESC LIMIT ?`)
+    .all(limit) as SentimentReportRow[];
+}
