@@ -202,9 +202,22 @@ export function failChatJob(id: string, error: string): void {
   `).run(error, new Date().toISOString(), id);
 }
 
-export function getRecentChatJobs(limit = 10): ChatJobRow[] {
+export function listChatJobs(limit: number, offset: number): ChatJobRow[] {
   return getDb()
-    .prepare(`SELECT * FROM chat_jobs ORDER BY created_at DESC LIMIT ?`)
-    .all(limit) as ChatJobRow[];
+    .prepare(`SELECT * FROM chat_jobs ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+    .all(limit, offset) as ChatJobRow[];
 }
 
+export function countChatJobs(): number {
+  const row = getDb()
+    .prepare(`SELECT COUNT(*) as count FROM chat_jobs`)
+    .get() as { count: number };
+  return row.count;
+}
+
+export function deleteChatJob(id: string): boolean {
+  const result = getDb()
+    .prepare(`DELETE FROM chat_jobs WHERE id = ?`)
+    .run(id);
+  return result.changes > 0;
+}

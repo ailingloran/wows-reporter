@@ -4,10 +4,12 @@ import { logger } from '../logger';
 import {
   ChatJobRow,
   completeChatJob,
+  countChatJobs,
+  deleteChatJob,
   failChatJob,
   getChatJob,
-  getRecentChatJobs,
   insertChatJob,
+  listChatJobs,
   updateChatJobStatus,
 } from '../store/db';
 
@@ -25,6 +27,14 @@ export interface ChatJobResponse {
 export interface ChatJobHistoryItem extends ChatJobResponse {
   createdAt: string;
   question: string;
+}
+
+export interface ChatJobHistoryPage {
+  items: ChatJobHistoryItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
 }
 
 function toChatJobResponse(job: ChatJobRow): ChatJobResponse {
@@ -64,12 +74,31 @@ export function getChatJobResponse(jobId: string): ChatJobResponse | null {
   return job ? toChatJobResponse(job) : null;
 }
 
-export function listRecentChatJobs(limit: number): ChatJobHistoryItem[] {
-  return getRecentChatJobs(limit).map((job) => ({
+export function getChatHistoryPage(page: number, pageSize: number): ChatJobHistoryPage {
+  const total = countChatJobs();
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(page, 1), totalPages);
+  const offset = (safePage - 1) * pageSize;
+  const items = listChatJobs(pageSize, offset).map((job) => ({
     ...toChatJobResponse(job),
     createdAt: job.created_at,
     question: job.question,
   }));
+
+  return {
+    items,
+    page: safePage,
+    pageSize,
+    total,
+    totalPages,
+  };
+}
+
+export function removeChatJob(jobId: string): boolean {
+  if (activeJobs.has(jobId)) {
+    return false;
+  }
+  return deleteChatJob(jobId);
 }
 
 export function queueChatJob(jobId: string): void {

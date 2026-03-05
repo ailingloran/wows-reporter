@@ -16,7 +16,7 @@ import {
   getSentimentReports,
   getSnapshotsBetween,
 } from '../store/db';
-import { createChatJob, getChatJobResponse, listRecentChatJobs } from './chatJobs';
+import { createChatJob, getChatHistoryPage, getChatJobResponse, removeChatJob } from './chatJobs';
 
 const app = express();
 app.use(express.json());
@@ -26,7 +26,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   if (origin.startsWith('http://localhost') || origin.includes('dockworks.dev')) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   }
   if (req.method === 'OPTIONS') {
     res.sendStatus(204);
@@ -131,8 +131,9 @@ app.get('/api/sentiment', (req: Request, res: Response) => {
 });
 
 app.get('/api/chat', (req: Request, res: Response) => {
-  const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
-  res.json(listRecentChatJobs(limit));
+  const page = Math.max(Number(req.query.page) || 1, 1);
+  const pageSize = Math.min(Math.max(Number(req.query.pageSize) || 20, 1), 100);
+  res.json(getChatHistoryPage(page, pageSize));
 });
 
 app.post('/api/chat', (req: Request, res: Response) => {
@@ -167,6 +168,22 @@ app.get('/api/chat/:jobId', (req: Request, res: Response) => {
     return;
   }
   res.json(job);
+});
+
+app.delete('/api/chat/:jobId', (req: Request, res: Response) => {
+  const job = getChatJobResponse(req.params.jobId);
+  if (!job) {
+    res.status(404).json({ error: 'Chat job not found' });
+    return;
+  }
+
+  const removed = removeChatJob(req.params.jobId);
+  if (!removed) {
+    res.status(409).json({ error: 'Chat job is still running and cannot be deleted yet' });
+    return;
+  }
+
+  res.json({ ok: true });
 });
 
 app.post('/api/trigger/daily', (_req: Request, res: Response) => {
