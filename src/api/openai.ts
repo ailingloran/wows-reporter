@@ -40,6 +40,74 @@ Rules:
 - If a category has nothing meaningful to report, use "Nothing notable"
 - Respond with valid JSON only, no extra text`;
 
+// ── Chat / Q&A ────────────────────────────────────────────────────────────────
+
+const MAX_AI_MESSAGES = 4_500; // hard context-window safety cap
+
+function shuffleSample<T>(arr: T[], n: number): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a.slice(0, n);
+}
+
+const CHAT_SYSTEM_PROMPT = `You are an analyst for a World of Warships gaming Discord server with access to a sample of recent player messages.
+
+World of Warships is a naval combat MMO. Be familiar with: ship names (Yamato, Montana, Kremlin, Smaland, Minotaur, etc.), ship classes (DDs/destroyers, CAs/cruisers, BBs/battleships, CVs/carriers, SSs/submarines), game modes (Ranked, Clan Battles, Random Battles, Co-op, Operations), mechanics (spotting, concealment, flooding, fire, torpedoes, dispersion, economy, commander XP), and community events.
+
+Answer the question based only on what is present in the provided messages. Be specific — name actual ships, game modes, or mechanics where relevant. If the messages do not contain enough information to answer confidently, say so clearly. Keep your answer concise and factual.`;
+
+export interface ChatResult {
+  answer:    string;
+  collected: number;
+  analysed:  number;
+}
+
+export async function answerQuestion(
+  messages: string[],
+  question: string,
+): Promise<ChatResult | null> {
+  if (!config.openAiApiKey) {
+    logger.warn('[openai] OPENAI_API_KEY not set — skipping chat');
+    return null;
+  }
+
+  const collected  = messages.length;
+  const toAnalyse  = collected > MAX_AI_MESSAGES
+    ? shuffleSample(messages, MAX_AI_MESSAGES)
+    : messages;
+  const analysed   = toAnalyse.length;
+  const messageBlock = toAnalyse.map((m, i) => `[${i + 1}] ${m}`).join('\n');
+
+  try {
+    const response = await getClient().chat.completions.create({
+      model:       'gpt-4o-mini',
+      temperature: 0.4,
+      max_tokens:  800,
+      messages: [
+        { role: 'system', content: CHAT_SYSTEM_PROMPT },
+        {
+          role:    'user',
+          content: `Here are ${analysed} Discord messages:\n\n${messageBlock}\n\nQuestion: ${question}`,
+        },
+      ],
+    });
+
+    const answer = response.choices[0]?.message?.content;
+    if (!answer) throw new Error('Empty response from OpenAI');
+
+    logger.info(`[openai] Chat answered. Collected: ${collected}, analysed: ${analysed}`);
+    return { answer, collected, analysed };
+  } catch (err) {
+    logger.error('[openai] Chat query failed:', err);
+    return null;
+  }
+}
+
+// ── Community Pulse ───────────────────────────────────────────────────────────
+
 export async function analyseCommunityPulse(messages: string[]): Promise<PulseResult | null> {
   if (!config.openAiApiKey) {
     logger.warn('[openai] OPENAI_API_KEY not set — skipping analysis');

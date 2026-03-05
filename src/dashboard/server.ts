@@ -136,6 +136,53 @@ app.get('/api/sentiment', (req: Request, res: Response) => {
   }
 });
 
+/** Community chat — freeform question about recent messages */
+app.post('/api/chat', async (req: Request, res: Response) => {
+  const { question, windowHours = 24, collectCap = 3000 } = req.body as {
+    question:    string;
+    windowHours: number;
+    collectCap:  number;
+  };
+
+  if (!question?.trim()) {
+    res.status(400).json({ error: 'question is required' });
+    return;
+  }
+
+  try {
+    const { collectMessagesForWindow } = await import('../collectors/messageCollector');
+    const { answerQuestion }           = await import('../api/openai');
+    const { config: cfg }              = await import('../config');
+
+    if (!cfg.sentimentChannelIds.length) {
+      res.status(400).json({ error: 'SENTIMENT_CHANNEL_IDS not configured' });
+      return;
+    }
+
+    const cappedHours = Math.min(Math.max(Number(windowHours) || 24, 1), 720);
+    const cappedCap   = Math.min(Math.max(Number(collectCap)  || 3000, 50), 10_000);
+
+    logger.info(`[dashboard] Chat — window: ${cappedHours}h, cap: ${cappedCap}, q: "${question}"`);
+
+    const messages = await collectMessagesForWindow(cfg.sentimentChannelIds, cappedHours, cappedCap);
+    if (messages.length < 5) {
+      res.json({ answer: 'Not enough messages found in that time window to answer meaningfully.', collected: messages.length, analysed: 0 });
+      return;
+    }
+
+    const result = await answerQuestion(messages, question);
+    if (!result) {
+      res.status(500).json({ error: 'OpenAI request failed' });
+      return;
+    }
+
+    res.json(result);
+  } catch (err) {
+    logger.error('[dashboard] /api/chat error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 /** Trigger daily report (fire-and-forget) */
 app.post('/api/trigger/daily', (_req: Request, res: Response) => {
   import('../reports/daily').then(({ runDailyReport }) => {
