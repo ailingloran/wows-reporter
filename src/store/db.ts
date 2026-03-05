@@ -1,6 +1,6 @@
 /**
  * SQLite database initialisation and helper functions.
- * Uses better-sqlite3 (synchronous API — safe for cron jobs).
+ * Uses better-sqlite3 (synchronous API - safe for cron jobs).
  */
 
 import Database from 'better-sqlite3';
@@ -8,13 +8,12 @@ import path from 'path';
 import fs from 'fs';
 import { logger } from '../logger';
 
-const DB_PATH  = path.join(process.cwd(), 'data', 'metrics.db');
+const DB_PATH = path.join(process.cwd(), 'data', 'metrics.db');
 const SQL_PATH = path.join(__dirname, 'schema.sql');
 
 let db: Database.Database;
 
 export function initDb(): Database.Database {
-  // Ensure data/ directory exists
   const dir = path.dirname(DB_PATH);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
@@ -22,7 +21,6 @@ export function initDb(): Database.Database {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
 
-  // Apply schema
   const schema = fs.readFileSync(SQL_PATH, 'utf-8');
   db.exec(schema);
   logger.info(`[db] Connected to ${DB_PATH}`);
@@ -34,18 +32,16 @@ export function getDb(): Database.Database {
   return db;
 }
 
-// ── Snapshot helpers ──────────────────────────────────────────────────────────
-
 export interface SnapshotRow {
-  id:                 number;
-  taken_at:           string;
-  period:             string;
-  messages:           number | null;
-  active_members:     number | null;
-  joins:              number | null;
-  leaves:             number | null;
-  player_role_count:  number | null;
-  raw_json:           string | null;
+  id: number;
+  taken_at: string;
+  period: string;
+  messages: number | null;
+  active_members: number | null;
+  joins: number | null;
+  leaves: number | null;
+  player_role_count: number | null;
+  raw_json: string | null;
 }
 
 export function insertSnapshot(data: Omit<SnapshotRow, 'id'>): number {
@@ -69,13 +65,11 @@ export function getSnapshotsBetween(period: 'daily' | 'monthly', from: string, t
     .all(period, from, to) as SnapshotRow[];
 }
 
-// ── Channel stats helpers ─────────────────────────────────────────────────────
-
 export interface ChannelStatRow {
-  snapshot_id:  number;
-  channel_id:   string;
+  snapshot_id: number;
+  channel_id: string;
   channel_name: string;
-  messages:     number;
+  messages: number;
 }
 
 export function insertChannelStats(snapshotId: number, channels: Array<{ channelId: string; name: string; messageCount: number }>): void {
@@ -96,8 +90,6 @@ export function getChannelStatsForSnapshot(snapshotId: number): ChannelStatRow[]
     .prepare(`SELECT * FROM channel_stats WHERE snapshot_id = ? ORDER BY messages DESC`)
     .all(snapshotId) as ChannelStatRow[];
 }
-
-// ── @Player role helpers ──────────────────────────────────────────────────────
 
 export function insertPlayerRoleEvent(userId: string, eventType: 'join' | 'leave'): void {
   getDb().prepare(`
@@ -131,12 +123,10 @@ export function getPlayerRoleSnapshotsBetween(from: string, to: string): Array<{
     .all(from, to) as Array<{ snapshot_date: string; total_count: number }>;
 }
 
-// ── Sentiment report helpers ──────────────────────────────────────────────────
-
 export interface SentimentReportRow {
-  id:       number;
+  id: number;
   taken_at: string;
-  mood:     string | null;
+  mood: string | null;
   raw_json: string | null;
 }
 
@@ -157,4 +147,57 @@ export function getSentimentReports(limit = 30): SentimentReportRow[] {
   return getDb()
     .prepare(`SELECT * FROM sentiment_reports ORDER BY taken_at DESC LIMIT ?`)
     .all(limit) as SentimentReportRow[];
+}
+
+export type ChatJobStatus = 'queued' | 'running' | 'completed' | 'failed';
+
+export interface ChatJobRow {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  question: string;
+  window_hours: number;
+  collect_cap: number;
+  status: ChatJobStatus;
+  answer: string | null;
+  collected: number | null;
+  analysed: number | null;
+  error: string | null;
+}
+
+export function insertChatJob(job: ChatJobRow): void {
+  getDb().prepare(`
+    INSERT INTO chat_jobs (id, created_at, updated_at, question, window_hours, collect_cap, status, answer, collected, analysed, error)
+    VALUES (@id, @created_at, @updated_at, @question, @window_hours, @collect_cap, @status, @answer, @collected, @analysed, @error)
+  `).run(job);
+}
+
+export function getChatJob(id: string): ChatJobRow | undefined {
+  return getDb()
+    .prepare(`SELECT * FROM chat_jobs WHERE id = ?`)
+    .get(id) as ChatJobRow | undefined;
+}
+
+export function updateChatJobStatus(id: string, status: ChatJobStatus, error: string | null = null): void {
+  getDb().prepare(`
+    UPDATE chat_jobs
+    SET status = ?, error = ?, updated_at = ?
+    WHERE id = ?
+  `).run(status, error, new Date().toISOString(), id);
+}
+
+export function completeChatJob(id: string, answer: string, collected: number, analysed: number): void {
+  getDb().prepare(`
+    UPDATE chat_jobs
+    SET status = 'completed', answer = ?, collected = ?, analysed = ?, error = NULL, updated_at = ?
+    WHERE id = ?
+  `).run(answer, collected, analysed, new Date().toISOString(), id);
+}
+
+export function failChatJob(id: string, error: string): void {
+  getDb().prepare(`
+    UPDATE chat_jobs
+    SET status = 'failed', error = ?, updated_at = ?
+    WHERE id = ?
+  `).run(error, new Date().toISOString(), id);
 }
