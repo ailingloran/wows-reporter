@@ -138,6 +138,8 @@ app.get('/api/sentiment', (req: Request, res: Response) => {
 
 /** Community chat — freeform question about recent messages */
 app.post('/api/chat', async (req: Request, res: Response) => {
+  logger.info(`[chat] content-type: ${req.headers['content-type']} | body: ${JSON.stringify(req.body)}`);
+
   const { question, windowHours = 24, collectCap = 3000 } = req.body as {
     question:    string;
     windowHours: number;
