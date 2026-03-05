@@ -16,7 +16,7 @@ import {
   getSentimentReports,
   getSnapshotsBetween,
 } from '../store/db';
-import { createChatJob, getChatJobResponse } from './chatJobs';
+import { createChatJob, getChatJobResponse, listRecentChatJobs } from './chatJobs';
 
 const app = express();
 app.use(express.json());
@@ -128,6 +128,11 @@ app.get('/api/sentiment', (req: Request, res: Response) => {
   } catch {
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+app.get('/api/chat', (req: Request, res: Response) => {
+  const limit = Math.min(Math.max(Number(req.query.limit) || 10, 1), 50);
+  res.json(listRecentChatJobs(limit));
 });
 
 app.post('/api/chat', (req: Request, res: Response) => {

@@ -6,6 +6,7 @@ import {
   completeChatJob,
   failChatJob,
   getChatJob,
+  getRecentChatJobs,
   insertChatJob,
   updateChatJobStatus,
 } from '../store/db';
@@ -19,6 +20,22 @@ export interface ChatJobResponse {
   collected?: number;
   analysed?: number;
   error?: string;
+}
+
+export interface ChatJobHistoryItem extends ChatJobResponse {
+  createdAt: string;
+  question: string;
+}
+
+function toChatJobResponse(job: ChatJobRow): ChatJobResponse {
+  return {
+    jobId: job.id,
+    status: job.status,
+    ...(job.answer ? { answer: job.answer } : {}),
+    ...(typeof job.collected === 'number' ? { collected: job.collected } : {}),
+    ...(typeof job.analysed === 'number' ? { analysed: job.analysed } : {}),
+    ...(job.error ? { error: job.error } : {}),
+  };
 }
 
 export function createChatJob(question: string, windowHours: number, collectCap: number): ChatJobResponse {
@@ -39,21 +56,20 @@ export function createChatJob(question: string, windowHours: number, collectCap:
 
   insertChatJob(job);
   queueChatJob(job.id);
-  return { jobId: job.id, status: job.status };
+  return toChatJobResponse(job);
 }
 
 export function getChatJobResponse(jobId: string): ChatJobResponse | null {
   const job = getChatJob(jobId);
-  if (!job) return null;
+  return job ? toChatJobResponse(job) : null;
+}
 
-  return {
-    jobId: job.id,
-    status: job.status,
-    ...(job.answer ? { answer: job.answer } : {}),
-    ...(typeof job.collected === 'number' ? { collected: job.collected } : {}),
-    ...(typeof job.analysed === 'number' ? { analysed: job.analysed } : {}),
-    ...(job.error ? { error: job.error } : {}),
-  };
+export function listRecentChatJobs(limit: number): ChatJobHistoryItem[] {
+  return getRecentChatJobs(limit).map((job) => ({
+    ...toChatJobResponse(job),
+    createdAt: job.created_at,
+    question: job.question,
+  }));
 }
 
 export function queueChatJob(jobId: string): void {

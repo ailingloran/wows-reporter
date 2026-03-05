@@ -201,3 +201,10 @@ export function failChatJob(id: string, error: string): void {
     WHERE id = ?
   `).run(error, new Date().toISOString(), id);
 }
+
+export function getRecentChatJobs(limit = 10): ChatJobRow[] {
+  return getDb()
+    .prepare(`SELECT * FROM chat_jobs ORDER BY created_at DESC LIMIT ?`)
+    .all(limit) as ChatJobRow[];
+}
+
