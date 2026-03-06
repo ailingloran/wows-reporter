@@ -141,8 +141,8 @@ async function runChatJob(jobId: string): Promise<void> {
     }
 
     const result = await answerQuestion(messages, job.question);
-    if (!result) {
-      failChatJob(jobId, 'OpenAI request failed');
+    if ('error' in result) {
+      failChatJob(jobId, result.error);
       return;
     }
 
