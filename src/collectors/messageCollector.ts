@@ -242,7 +242,7 @@ async function readForumChannelFull(forum: any, channelId: string, cutoff: numbe
   const { threads: activeThreads } = await forum.threads.fetchActive();
   for (const thread of activeThreads.values()) {
     try {
-      results.push(...await readMessagesFull(thread as AnyThreadChannel, channelId, cutoff, SAFETY_CAP));
+      results.push(...await readMessagesFull(thread as AnyThreadChannel, channelId, cutoff, Number.MAX_SAFE_INTEGER));
     } catch (err) {
       logger.warn(`[messageCollector] Backfill: failed to read active thread ${thread.id}:`, err);
     }
@@ -253,7 +253,7 @@ async function readForumChannelFull(forum: any, channelId: string, cutoff: numbe
     const recent = archivedThreads.filter((t: AnyThreadChannel) => (t.archiveTimestamp ?? 0) >= cutoff);
     for (const thread of recent.values()) {
       try {
-        results.push(...await readMessagesFull(thread as AnyThreadChannel, channelId, cutoff, SAFETY_CAP));
+        results.push(...await readMessagesFull(thread as AnyThreadChannel, channelId, cutoff, Number.MAX_SAFE_INTEGER));
       } catch (err) {
         logger.warn(`[messageCollector] Backfill: failed to read archived thread ${thread.id}:`, err);
       }
@@ -288,7 +288,7 @@ export async function collectMessagesForWindowFull(
       if (channel.type === ChannelType.GuildForum) {
         rows = await readForumChannelFull(channel, channelId, cutoff);
       } else if (channel.isTextBased()) {
-        rows = await readMessagesFull(channel as TextChannel, channelId, cutoff, SAFETY_CAP * 5);
+        rows = await readMessagesFull(channel as TextChannel, channelId, cutoff, Number.MAX_SAFE_INTEGER);
       }
       logger.info(`[messageCollector] Backfill channel ${channelId}: ${rows.length} messages`);
       all.push(...rows);
