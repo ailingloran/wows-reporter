@@ -75,22 +75,38 @@ async function readForumChannel(forum: any, cutoff: number, perThreadCap = SAFET
     }
   }
 
-  // 2. Recently archived threads — fetch up to 100, filter to those
-  //    whose archiveTimestamp falls within the last 24h
+  // 2. Recently archived threads — paginate until all threads in a batch are older than cutoff
   try {
-    const { threads: archivedThreads } = await forum.threads.fetchArchived({ limit: 100 });
-    const recentArchived = archivedThreads.filter(
-      (t: AnyThreadChannel) => (t.archiveTimestamp ?? 0) >= cutoff,
-    );
-    logger.debug(`[messageCollector] Forum ${forum.id}: ${recentArchived.size} recently archived thread(s)`);
+    let beforeId: string | undefined;
 
-    for (const thread of recentArchived.values()) {
-      try {
-        const msgs = await readMessagesFrom(thread as AnyThreadChannel, cutoff, perThreadCap);
-        results.push(...msgs);
-      } catch (err) {
-        logger.warn(`[messageCollector] Failed to read archived thread ${thread.id}:`, err);
+    while (true) {
+      const fetchOptions: { limit: number; before?: string } = { limit: 100 };
+      if (beforeId) fetchOptions.before = beforeId;
+
+      const { threads: archivedThreads, hasMore } = await forum.threads.fetchArchived(fetchOptions);
+      if (archivedThreads.size === 0) break;
+
+      const sorted = [...archivedThreads.values()].sort(
+        (a: AnyThreadChannel, b: AnyThreadChannel) => (b.archiveTimestamp ?? 0) - (a.archiveTimestamp ?? 0),
+      );
+
+      let allOlderThanCutoff = true;
+      for (const thread of sorted) {
+        if ((thread.archiveTimestamp ?? 0) >= cutoff) {
+          allOlderThanCutoff = false;
+          try {
+            const msgs = await readMessagesFrom(thread as AnyThreadChannel, cutoff, perThreadCap);
+            results.push(...msgs);
+          } catch (err) {
+            logger.warn(`[messageCollector] Failed to read archived thread ${thread.id}:`, err);
+          }
+        }
       }
+
+      if (allOlderThanCutoff || !hasMore) break;
+
+      const oldest = sorted[sorted.length - 1] as AnyThreadChannel;
+      beforeId = oldest.id;
     }
   } catch (err) {
     logger.warn(`[messageCollector] Failed to fetch archived threads for forum ${forum.id}:`, err);
@@ -248,15 +264,42 @@ async function readForumChannelFull(forum: any, channelId: string, cutoff: numbe
     }
   }
 
+  // Paginate archived threads until we reach threads older than the cutoff
   try {
-    const { threads: archivedThreads } = await forum.threads.fetchArchived({ limit: 100 });
-    const recent = archivedThreads.filter((t: AnyThreadChannel) => (t.archiveTimestamp ?? 0) >= cutoff);
-    for (const thread of recent.values()) {
-      try {
-        results.push(...await readMessagesFull(thread as AnyThreadChannel, channelId, cutoff, Number.MAX_SAFE_INTEGER));
-      } catch (err) {
-        logger.warn(`[messageCollector] Backfill: failed to read archived thread ${thread.id}:`, err);
+    let beforeId: string | undefined;
+    let pagesDone = 0;
+
+    while (true) {
+      const fetchOptions: { limit: number; before?: string } = { limit: 100 };
+      if (beforeId) fetchOptions.before = beforeId;
+
+      const { threads: archivedThreads, hasMore } = await forum.threads.fetchArchived(fetchOptions);
+      if (archivedThreads.size === 0) break;
+
+      const sorted = [...archivedThreads.values()].sort(
+        (a: AnyThreadChannel, b: AnyThreadChannel) => (b.archiveTimestamp ?? 0) - (a.archiveTimestamp ?? 0),
+      );
+
+      let allOlderThanCutoff = true;
+      for (const thread of sorted) {
+        if ((thread.archiveTimestamp ?? 0) >= cutoff) {
+          allOlderThanCutoff = false;
+          try {
+            results.push(...await readMessagesFull(thread as AnyThreadChannel, channelId, cutoff, Number.MAX_SAFE_INTEGER));
+          } catch (err) {
+            logger.warn(`[messageCollector] Backfill: failed to read archived thread ${thread.id}:`, err);
+          }
+        }
       }
+
+      pagesDone++;
+      logger.debug(`[messageCollector] Backfill: forum ${channelId} archived page ${pagesDone} — ${archivedThreads.size} threads`);
+
+      if (allOlderThanCutoff || !hasMore) break;
+
+      // Use the oldest thread in this batch as the cursor for the next page
+      const oldest = sorted[sorted.length - 1] as AnyThreadChannel;
+      beforeId = oldest.id;
     }
   } catch (err) {
     logger.warn(`[messageCollector] Backfill: failed to fetch archived threads for ${channelId}:`, err);
