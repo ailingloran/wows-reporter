@@ -11,6 +11,8 @@
 import { ChannelType, Collection, Message, TextChannel, AnyThreadChannel } from 'discord.js';
 import { getDiscordClient } from '../api/discord';
 import { logger } from '../logger';
+import { isIndexable } from '../indexer/messageFilter';
+import type { MessageRow } from '../store/messageDb';
 
 const BATCH_SIZE = 100;   // Discord API maximum per fetch request
 const SAFETY_CAP = 2000;  // max messages per channel/thread
@@ -189,4 +191,112 @@ export async function collectMessagesForWindow(
 
   logger.info(`[messageCollector] Chat collect: ${result.length} messages (${windowHours}h window, cap ${cappedTotal})`);
   return result;
+}
+
+// ── Full-data variants for the message index backfill ─────────────────────────
+
+/**
+ * Like readMessagesFrom but returns full MessageRow objects (with IDs/timestamps)
+ * and applies the isIndexable filter. Used only by the backfill path.
+ */
+async function readMessagesFull(
+  channel: TextChannel | AnyThreadChannel,
+  channelId: string,
+  cutoff: number,
+  cap: number,
+): Promise<MessageRow[]> {
+  const results: MessageRow[] = [];
+  let lastId: string | undefined;
+  let reachedCutoff = false;
+
+  while (!reachedCutoff && results.length < cap) {
+    const options: { limit: number; before?: string } = { limit: BATCH_SIZE };
+    if (lastId) options.before = lastId;
+
+    const batch: Collection<string, Message> = await channel.messages.fetch(options);
+    if (batch.size === 0) break;
+
+    for (const msg of batch.values()) {
+      if (msg.createdTimestamp < cutoff) { reachedCutoff = true; break; }
+      if (!msg.author.bot && isIndexable(msg.content)) {
+        results.push({
+          message_id: msg.id,
+          channel_id: channelId,
+          author_id:  msg.author.id,
+          content:    msg.content.trim(),
+          created_at: msg.createdTimestamp,
+        });
+      }
+    }
+
+    lastId = batch.last()?.id;
+    if (!lastId) break;
+  }
+
+  return results;
+}
+
+async function readForumChannelFull(forum: any, channelId: string, cutoff: number): Promise<MessageRow[]> {
+  const results: MessageRow[] = [];
+
+  const { threads: activeThreads } = await forum.threads.fetchActive();
+  for (const thread of activeThreads.values()) {
+    try {
+      results.push(...await readMessagesFull(thread as AnyThreadChannel, channelId, cutoff, SAFETY_CAP));
+    } catch (err) {
+      logger.warn(`[messageCollector] Backfill: failed to read active thread ${thread.id}:`, err);
+    }
+  }
+
+  try {
+    const { threads: archivedThreads } = await forum.threads.fetchArchived({ limit: 100 });
+    const recent = archivedThreads.filter((t: AnyThreadChannel) => (t.archiveTimestamp ?? 0) >= cutoff);
+    for (const thread of recent.values()) {
+      try {
+        results.push(...await readMessagesFull(thread as AnyThreadChannel, channelId, cutoff, SAFETY_CAP));
+      } catch (err) {
+        logger.warn(`[messageCollector] Backfill: failed to read archived thread ${thread.id}:`, err);
+      }
+    }
+  } catch (err) {
+    logger.warn(`[messageCollector] Backfill: failed to fetch archived threads for ${channelId}:`, err);
+  }
+
+  return results;
+}
+
+/**
+ * Collect full message rows (with IDs) across all configured channels for
+ * the backfill. No cap — collects everything in the window that passes
+ * the isIndexable filter.
+ */
+export async function collectMessagesForWindowFull(
+  channelIds:  string[],
+  windowHours: number,
+): Promise<MessageRow[]> {
+  const client   = getDiscordClient();
+  const windowMs = Math.min(windowHours, 720) * 60 * 60 * 1000;
+  const cutoff   = Date.now() - windowMs;
+  const all: MessageRow[] = [];
+
+  for (const channelId of channelIds) {
+    try {
+      const channel = await client.channels.fetch(channelId);
+      if (!channel) continue;
+
+      let rows: MessageRow[] = [];
+      if (channel.type === ChannelType.GuildForum) {
+        rows = await readForumChannelFull(channel, channelId, cutoff);
+      } else if (channel.isTextBased()) {
+        rows = await readMessagesFull(channel as TextChannel, channelId, cutoff, SAFETY_CAP * 5);
+      }
+      logger.info(`[messageCollector] Backfill channel ${channelId}: ${rows.length} messages`);
+      all.push(...rows);
+    } catch (err) {
+      logger.warn(`[messageCollector] Backfill: failed to process channel ${channelId}:`, err);
+    }
+  }
+
+  logger.info(`[messageCollector] Backfill total: ${all.length} messages across ${channelIds.length} channel(s)`);
+  return all;
 }

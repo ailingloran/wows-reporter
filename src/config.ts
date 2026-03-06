@@ -43,6 +43,11 @@ export const config = {
   // Community Pulse (OpenAI sentiment analysis)
   openAiApiKey:        process.env.OPENAI_API_KEY || '',
   sentimentChannelIds: (process.env.SENTIMENT_CHANNEL_IDS || '').split(',').filter(Boolean),
+
+  // Message index (Hetzner volume)
+  messageDbPath:          process.env.MESSAGE_DB_PATH || '/mnt/HC_Volume_105012469/messages.db',
+  minIndexMessageLength:  parseInt(process.env.MIN_INDEX_MESSAGE_LENGTH || '30', 10),
+  minIndexWordCount:      parseInt(process.env.MIN_INDEX_WORD_COUNT     || '6',  10),
 };
 
 // ── Keyword Buckets ───────────────────────────────────────────────────────────

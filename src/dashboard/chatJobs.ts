@@ -1,6 +1,32 @@
 import { randomUUID } from 'node:crypto';
 import { config } from '../config';
 import { logger } from '../logger';
+import { countIndexedMessages, queryIndexedMessages } from '../store/messageDb';
+
+// Minimum messages in the index before we trust it over the Discord API
+const MIN_INDEX_MESSAGES = 500;
+
+const STOP_WORDS = new Set([
+  'what', 'how', 'when', 'where', 'why', 'who', 'which', 'are', 'is',
+  'the', 'and', 'for', 'with', 'that', 'this', 'from', 'have', 'been',
+  'they', 'their', 'about', 'would', 'could', 'should', 'were', 'will',
+  'can', 'did', 'does', 'into', 'your', 'you', 'our', 'more', 'like',
+  'than', 'think', 'players', 'player', 'say', 'says', 'said', 'feel',
+  'feels', 'tell', 'give', 'make', 'take', 'want', 'need', 'there',
+  'some', 'other', 'most', 'much', 'many', 'very', 'just', 'also',
+  'only', 'but', 'not', 'all', 'any', 'its', 'it', 'be', 'has', 'do',
+  'an', 'we', 'in', 'on', 'to', 'of', 'at', 'by',
+]);
+
+function extractKeywords(question: string): string[] {
+  return [...new Set(
+    question
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length >= 4 && !STOP_WORDS.has(w)),
+  )];
+}
 import {
   ChatJobRow,
   completeChatJob,
@@ -125,14 +151,35 @@ async function runChatJob(jobId: string): Promise<void> {
     updateChatJobStatus(jobId, 'running');
     logger.info(`[chat-job] Started ${jobId} (${job.window_hours}h, cap ${job.collect_cap})`);
 
-    const { collectMessagesForWindow } = await import('../collectors/messageCollector');
     const { answerQuestion } = await import('../api/openai');
 
-    const messages = await collectMessagesForWindow(
-      config.sentimentChannelIds,
-      job.window_hours,
-      job.collect_cap,
-    );
+    const keywords     = extractKeywords(job.question);
+    const indexedCount = countIndexedMessages(job.window_hours);
+    const useIndex     = indexedCount >= MIN_INDEX_MESSAGES;
+
+    let messages: string[];
+
+    if (useIndex) {
+      messages = queryIndexedMessages(
+        job.window_hours,
+        config.sentimentChannelIds,
+        job.collect_cap,
+        keywords,
+      );
+      logger.info(
+        `[chat-job] Using index (${indexedCount} msgs in window). Keywords: [${keywords.join(', ')}]. Returning ${messages.length}`,
+      );
+    } else {
+      logger.info(
+        `[chat-job] Index has only ${indexedCount} msgs in ${job.window_hours}h window — falling back to Discord API`,
+      );
+      const { collectMessagesForWindow } = await import('../collectors/messageCollector');
+      messages = await collectMessagesForWindow(
+        config.sentimentChannelIds,
+        job.window_hours,
+        job.collect_cap,
+      );
+    }
 
     if (messages.length < 5) {
       completeChatJob(jobId, 'Not enough messages found in that time window to answer meaningfully.', messages.length, 0);

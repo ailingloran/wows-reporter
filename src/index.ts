@@ -5,20 +5,23 @@
 
 import 'dotenv/config';
 import { initDb } from './store/db';
+import { initMessageDb } from './store/messageDb';
 import { initDiscordClient, getDiscordClient } from './api/discord';
 import { registerSchedules } from './scheduler';
 import { runDailyReport } from './reports/daily';
 import { runMonthlyReport } from './reports/monthly';
 import { startDashboard } from './dashboard/server';
+import { startMessageIndexer, backfillMessages } from './indexer/messageIndexer';
 import { config } from './config';
 import { logger } from './logger';
 
 async function main() {
   logger.info('=== WoWS Reporter starting ===');
 
-  // 1. Initialise SQLite database (creates tables if not exist)
+  // 1. Initialise SQLite databases
   initDb();
-  logger.info('Database initialised');
+  initMessageDb();
+  logger.info('Databases initialised');
 
   // 2. Connect Discord bot
   await initDiscordClient();
@@ -58,6 +61,16 @@ async function main() {
     process.exit(0);
   }
 
+  // ── Backfill mode ─────────────────────────────────────────────────────────────
+  const backfillArg = args.find(a => a.startsWith('--backfill'));
+  if (backfillArg !== undefined) {
+    const hours = backfillArg.includes('=') ? parseInt(backfillArg.split('=')[1], 10) : 168;
+    logger.info(`Backfill mode: fetching last ${hours}h of messages…`);
+    await backfillMessages(hours);
+    logger.info('Backfill complete. Exiting.');
+    process.exit(0);
+  }
+
   // ── Normal operation ─────────────────────────────────────────────────────────
   // 3. Register cron jobs
   registerSchedules();
@@ -69,6 +82,9 @@ async function main() {
     startDashboard();
     logger.info(`Dashboard listening on port ${config.dashboardPort}`);
   }
+
+  // 5. Start real-time message indexer
+  startMessageIndexer();
 
   logger.info('=== WoWS Reporter running. Waiting for scheduled events. ===');
 }
