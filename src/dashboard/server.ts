@@ -72,10 +72,11 @@ app.get('/api/status', (_req: Request, res: Response) => {
   }
 });
 
-app.get('/api/daily', (_req: Request, res: Response) => {
+app.get('/api/daily', (req: Request, res: Response) => {
   try {
+    const days = Math.min(365, Math.max(1, parseInt((req.query.days as string) || '365', 10)));
     const to = new Date();
-    const from = new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const from = new Date(to.getTime() - days * 24 * 60 * 60 * 1000);
     const rows = getSnapshotsBetween('daily', from.toISOString(), to.toISOString());
     res.json(rows);
   } catch (error) {
