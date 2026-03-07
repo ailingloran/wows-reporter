@@ -16,6 +16,7 @@ import {
   getSentimentReports,
   getSnapshotsBetween,
 } from '../store/db';
+import { countIndexedMessages } from '../store/messageDb';
 import { createChatJob, getChatHistoryPage, getChatJobResponse, removeChatJob } from './chatJobs';
 
 const app = express();
@@ -65,6 +66,7 @@ app.get('/api/status', (_req: Request, res: Response) => {
       lastMonthlyAt: lastMonthly?.taken_at ?? null,
       lastSentimentAt: lastSentiment?.taken_at ?? null,
       lastMood: lastSentiment?.mood ?? null,
+      totalMessages: countIndexedMessages(),
     });
   } catch (error) {
     logger.error('[dashboard] /api/status error:', error);
