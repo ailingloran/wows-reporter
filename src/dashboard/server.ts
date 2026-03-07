@@ -187,8 +187,16 @@ app.delete('/api/chat/:jobId', (req: Request, res: Response) => {
 });
 
 app.post('/api/trigger/daily', (_req: Request, res: Response) => {
-  import('../reports/daily').then(({ runDailyReport }) => {
-    runDailyReport().catch((error: unknown) => logger.error('[dashboard] Triggered daily report failed:', error));
+  Promise.all([
+    import('../reports/daily'),
+    import('../collectors/memberTracker'),
+  ]).then(async ([{ runDailyReport }, { snapshotPlayerRole }]) => {
+    const client = (await import('../api/discord')).getDiscordClient();
+    const { config: cfg } = await import('../config');
+    const guild = await client.guilds.fetch(cfg.statbotGuildId);
+    snapshotPlayerRole(guild)
+      .then(() => runDailyReport())
+      .catch((error: unknown) => logger.error('[dashboard] Triggered daily report failed:', error));
     res.json({ ok: true, message: 'Daily report triggered' });
   }).catch(() => res.status(500).json({ error: 'Failed to load report module' }));
 });

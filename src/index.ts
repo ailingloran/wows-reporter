@@ -49,6 +49,9 @@ async function main() {
   // ── Manual test modes ────────────────────────────────────────────────────────
   if (args.includes('--test-daily')) {
     logger.info('Test mode: triggering daily report manually...');
+    const { snapshotPlayerRole } = await import('./collectors/memberTracker');
+    const guild = await getDiscordClient().guilds.fetch(config.statbotGuildId);
+    await snapshotPlayerRole(guild);
     await runDailyReport();
     logger.info('Daily report test complete. Exiting.');
     process.exit(0);
