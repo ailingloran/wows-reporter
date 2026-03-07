@@ -87,9 +87,8 @@ app.get('/api/daily', (req: Request, res: Response) => {
 
 app.get('/api/monthly', (_req: Request, res: Response) => {
   try {
-    const to = new Date();
-    const from = new Date(to.getTime() - 365 * 24 * 60 * 60 * 1000);
-    const rows = getSnapshotsBetween('monthly', from.toISOString(), to.toISOString());
+    // Return all monthly snapshots ever recorded — no cap
+    const rows = getSnapshotsBetween('monthly', '2000-01-01', new Date().toISOString());
     res.json(rows);
   } catch {
     res.status(500).json({ error: 'Internal server error' });
