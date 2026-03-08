@@ -9,12 +9,15 @@ import { EmbedBuilder } from 'discord.js';
 import { config } from '../config';
 import { logger } from '../logger';
 import { queryIndexedMessages } from '../store/messageDb';
+import { collectRecentMessages } from '../collectors/messageCollector';
 import { analyseCommunityPulse } from '../api/openai';
 import { postDailyReport } from '../api/discord';
 import { insertSentimentReport } from '../store/db';
 import { formatDate } from './formatters';
 
-export async function runSentimentReport(): Promise<void> {
+export type SentimentSource = 'db' | 'live';
+
+export async function runSentimentReport(source: SentimentSource = 'db'): Promise<void> {
   // ── Precondition checks ────────────────────────────────────────────────────
   if (!config.openAiApiKey) {
     logger.warn('[sentiment] OPENAI_API_KEY not set — Community Pulse report skipped');
@@ -25,12 +28,14 @@ export async function runSentimentReport(): Promise<void> {
     return;
   }
 
-  logger.info('[sentiment] Starting Community Pulse report...');
+  logger.info(`[sentiment] Starting Community Pulse report (source: ${source})...`);
 
-  // ── Collect messages from the local message index (last 24 hours) ────────
-  // queryIndexedMessages reads from the on-disk SQLite DB — no Discord API
-  // calls needed. This is the same source the /api/chat feature uses.
-  const messages = queryIndexedMessages(24, config.sentimentChannelIds, config.sentimentMessageLimit, []);
+  // ── Collect messages ───────────────────────────────────────────────────────
+  // 'db'   → reads from the on-disk SQLite index (fast, same as /api/chat)
+  // 'live' → paginates the Discord REST API in real-time (slower but fresh)
+  const messages = source === 'live'
+    ? await collectRecentMessages(config.sentimentChannelIds)
+    : queryIndexedMessages(24, config.sentimentChannelIds, config.sentimentMessageLimit, []);
 
   if (messages.length < 10) {
     logger.warn(`[sentiment] Only ${messages.length} messages found — not enough data, skipping`);

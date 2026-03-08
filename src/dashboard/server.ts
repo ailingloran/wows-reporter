@@ -220,8 +220,15 @@ app.post('/api/trigger/daily', (_req: Request, res: Response) => {
 
 app.post('/api/trigger/sentiment', (_req: Request, res: Response) => {
   import('../reports/sentiment').then(({ runSentimentReport }) => {
-    runSentimentReport().catch((error: unknown) => logger.error('[dashboard] Triggered sentiment report failed:', error));
-    res.json({ ok: true, message: 'Sentiment report triggered' });
+    runSentimentReport('db').catch((error: unknown) => logger.error('[dashboard] Triggered sentiment report failed:', error));
+    res.json({ ok: true, message: 'Sentiment report triggered (DB source)' });
+  }).catch(() => res.status(500).json({ error: 'Failed to load report module' }));
+});
+
+app.post('/api/trigger/sentiment/live', (_req: Request, res: Response) => {
+  import('../reports/sentiment').then(({ runSentimentReport }) => {
+    runSentimentReport('live').catch((error: unknown) => logger.error('[dashboard] Triggered live sentiment report failed:', error));
+    res.json({ ok: true, message: 'Sentiment report triggered (live Discord scrape)' });
   }).catch(() => res.status(500).json({ error: 'Failed to load report module' }));
 });
 
