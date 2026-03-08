@@ -7,13 +7,18 @@ import OpenAI from 'openai';
 import { config } from '../config';
 import { logger } from '../logger';
 
+export interface PulseItem {
+  text: string;
+  msgs: number[];
+}
+
 export interface PulseResult {
-  topics: string[];
-  pain_points: string[];
-  positives: string[];
-  trending: string;
-  mood_score: number;
-  mood: string;
+  topics:      PulseItem[];
+  pain_points: PulseItem[];
+  positives:   PulseItem[];
+  trending:    string;
+  mood_score:  number;
+  mood:        string;
 }
 
 let _client: OpenAI | null = null;
@@ -54,17 +59,22 @@ const SYSTEM_PROMPT = `You are a community analyst for a World of Warships gamin
 World of Warships is a naval combat MMO. Common topics include: specific ships (e.g. Kremlin, Yamato, Smaland), ship classes (destroyers/DDs, cruisers/CAs, battleships/BBs, carriers/CVs, submarines/SSs), game modes (Ranked, Clan Battles, Operations, Co-op, Random), mechanics (spotting, concealment, flooding, fire, torpedoes, CV rework, economy, credits, dockyard), balance/meta shifts, recent patches or updates, and community events.
 
 Analyse the player messages provided and return a JSON object with exactly these fields:
-- "topics": array of up to 5 strings - the most discussed topics. Each string must include the topic name AND a brief explanation of what players were actually saying about it, separated by " - ". Example: "Submarine depth charge mechanics - players debating whether DDs have enough tools to counter subs" not just "Submarine mechanics"
-- "pain_points": array of 1-4 strings - main complaints or frustrations players expressed. Be specific about what exactly they are unhappy about
-- "positives": array of 1-3 strings - things players praised or reacted positively to. Be specific
-- "trending": a single string - what topic or event spiked noticeably in the last 24h compared to background noise (or "Nothing unusually trending" if nothing stands out)
-- "mood_score": an integer from 1 to 5 - overall community mood (1 = very negative/toxic, 3 = neutral/mixed, 5 = very positive/hype)
-- "mood": a single string - one sentence describing the overall community mood with specific colour, e.g. mention what is driving it
+- "topics": array of up to 5 objects — the most discussed topics. Each object has:
+    - "text": string — topic name plus what players were actually saying, e.g. "Submarine depth charge mechanics - players debating whether DDs have enough counter-play tools"
+    - "msgs": array of integer message indices (the [N] numbers) that directly support this topic
+- "pain_points": array of 1-4 objects (same shape: "text" + "msgs") — specific complaints or frustrations players expressed
+- "positives": array of 1-3 objects (same shape: "text" + "msgs") — things players praised or reacted positively to
+- "trending": a single string — the one topic or event that spiked noticeably in the last 24h (or "Nothing unusually trending")
+- "mood_score": an integer from 1 to 5 — overall community mood (1 = very negative/toxic, 3 = neutral/mixed, 5 = very positive/hype)
+- "mood": a single string — one sentence describing the overall community mood, mentioning what is driving it
 
-Rules:
-- Always name specific ships, mechanics, patches, or game modes - never say "balance issues" when you can say "Smaland torpedo reload nerf"
+STRICT EVIDENCE RULES — these are mandatory, not suggestions:
+- ONLY report what is explicitly and directly stated in the messages. Do not infer, extrapolate, or speculate about topics not clearly present
+- Every item in "topics", "pain_points", and "positives" MUST include at least 2 different message indices in "msgs" that directly support it. If you cannot find 2 supporting messages, omit the item entirely
+- NEVER name specific game changes (nerfs, buffs, reworks, patches) unless players explicitly mention them by name in the messages
+- Describe only what players actually said — use the exact ships, mechanics, and game modes they named
 - Ignore greetings, memes, off-topic chat, and one-word messages
-- If a category has nothing meaningful to report, use "Nothing notable"
+- If a category has no items supported by evidence, return an empty array [] — do not fabricate content
 - Respond with valid JSON only, no extra text`;
 
 const MAX_AI_MESSAGES = 4_500;
@@ -154,7 +164,7 @@ export async function analyseCommunityPulse(messages: string[]): Promise<PulseRe
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: `Analyse these ${messages.length} Discord messages:\n\n${messageBlock}` },
       ],
-      max_tokens: 700,
+      max_tokens: 1000,
       temperature: 0.3,
     });
 
@@ -167,7 +177,20 @@ export async function analyseCommunityPulse(messages: string[]): Promise<PulseRe
       throw new Error('Unexpected JSON shape from OpenAI');
     }
 
-    logger.info(`[openai] Pulse analysis complete. Mood: "${parsed.mood}"`);
+    // Drop any item that doesn't have at least 2 supporting message indices.
+    // This is our primary anti-hallucination guard — if the model can't cite
+    // two distinct messages, the claim is unsupported and gets removed.
+    const requireEvidence = (items: PulseItem[]): PulseItem[] =>
+      (items ?? []).filter(item => Array.isArray(item.msgs) && item.msgs.length >= 2);
+
+    parsed.topics      = requireEvidence(parsed.topics);
+    parsed.pain_points = requireEvidence(parsed.pain_points);
+    parsed.positives   = requireEvidence(parsed.positives);
+
+    logger.info(
+      `[openai] Pulse analysis complete. Mood: "${parsed.mood}" | ` +
+      `topics=${parsed.topics.length} pain=${parsed.pain_points.length} positives=${parsed.positives.length}`,
+    );
     return parsed;
   } catch (error) {
     logger.error('[openai] Failed to analyse community pulse:', error);

@@ -49,9 +49,9 @@ export async function runSentimentReport(): Promise<void> {
   // ── Build embed ────────────────────────────────────────────────────────────
   const today = formatDate(new Date());
 
-  const topicsText    = pulse.topics.map(t => `• ${t}`).join('\n')      || '_Nothing notable_';
-  const painText      = pulse.pain_points.map(p => `• ${p}`).join('\n') || '_Nothing notable_';
-  const positivesText = pulse.positives.map(p => `• ${p}`).join('\n')   || '_Nothing notable_';
+  const topicsText    = pulse.topics.map(t => `• ${t.text}`).join('\n')      || '_Nothing notable_';
+  const painText      = pulse.pain_points.map(p => `• ${p.text}`).join('\n') || '_Nothing notable_';
+  const positivesText = pulse.positives.map(p => `• ${p.text}`).join('\n')   || '_Nothing notable_';
 
   const moodScore  = Math.min(5, Math.max(1, Math.round(pulse.mood_score ?? 3)));
   const moodBar    = '█'.repeat(moodScore) + '░'.repeat(5 - moodScore);
