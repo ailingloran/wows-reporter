@@ -43,7 +43,7 @@ export const config = {
   // Community Pulse (OpenAI sentiment analysis)
   openAiApiKey:        process.env.OPENAI_API_KEY || '',
   sentimentChannelIds:   (process.env.SENTIMENT_CHANNEL_IDS || '').split(',').filter(Boolean),
-  sentimentMessageLimit: parseInt(process.env.SENTIMENT_MESSAGE_LIMIT || '1000', 10),
+  sentimentMessageLimit: parseInt(process.env.SENTIMENT_MESSAGE_LIMIT || '3000', 10),
 
   // Message index (Hetzner volume)
   messageDbPath:          process.env.MESSAGE_DB_PATH || '/mnt/HC_Volume_105012469/messages.db',
