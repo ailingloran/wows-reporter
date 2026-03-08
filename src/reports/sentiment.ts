@@ -8,7 +8,7 @@
 import { EmbedBuilder } from 'discord.js';
 import { config } from '../config';
 import { logger } from '../logger';
-import { collectRecentMessages } from '../collectors/messageCollector';
+import { queryIndexedMessages } from '../store/messageDb';
 import { analyseCommunityPulse } from '../api/openai';
 import { postDailyReport } from '../api/discord';
 import { insertSentimentReport } from '../store/db';
@@ -27,8 +27,10 @@ export async function runSentimentReport(): Promise<void> {
 
   logger.info('[sentiment] Starting Community Pulse report...');
 
-  // ── Collect messages (last 24 hours) ──────────────────────────────────────
-  const messages = await collectRecentMessages(config.sentimentChannelIds);
+  // ── Collect messages from the local message index (last 24 hours) ────────
+  // queryIndexedMessages reads from the on-disk SQLite DB — no Discord API
+  // calls needed. This is the same source the /api/chat feature uses.
+  const messages = queryIndexedMessages(24, config.sentimentChannelIds, config.sentimentMessageLimit, []);
 
   if (messages.length < 10) {
     logger.warn(`[sentiment] Only ${messages.length} messages found — not enough data, skipping`);
