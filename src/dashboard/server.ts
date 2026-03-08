@@ -22,9 +22,20 @@ import { createChatJob, getChatHistoryPage, getChatJobResponse, removeChatJob } 
 const app = express();
 app.use(express.json());
 
+// Simple in-memory rate limiter for expensive AI endpoints (max 10/min globally)
+const chatTimestamps: number[] = [];
+function chatRateLimitOk(): boolean {
+  const now = Date.now();
+  const cutoff = now - 60_000;
+  while (chatTimestamps.length > 0 && chatTimestamps[0] < cutoff) chatTimestamps.shift();
+  if (chatTimestamps.length >= 10) return false;
+  chatTimestamps.push(now);
+  return true;
+}
+
 app.use((req: Request, res: Response, next: NextFunction) => {
   const origin = req.headers.origin ?? '';
-  if (origin.startsWith('http://localhost') || origin.includes('dockworks.dev')) {
+  if (origin.startsWith('http://localhost') || origin === 'https://dockworks.dev') {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
@@ -139,6 +150,10 @@ app.get('/api/chat', (req: Request, res: Response) => {
 });
 
 app.post('/api/chat', (req: Request, res: Response) => {
+  if (!chatRateLimitOk()) {
+    res.status(429).json({ error: 'Too many chat requests — wait a moment and try again' });
+    return;
+  }
   const { question, windowHours = 24, collectCap = 3000 } = req.body as {
     question: string;
     windowHours: number;
