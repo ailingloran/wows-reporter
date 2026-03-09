@@ -104,6 +104,80 @@ export interface ChatFailure {
   error: string;
 }
 
+// ── Keyword extraction (first pass for FTS5 chat search) ─────────────────────
+
+const STOP_WORDS = new Set([
+  'what', 'how', 'when', 'where', 'why', 'who', 'which', 'are', 'is',
+  'the', 'and', 'for', 'with', 'that', 'this', 'from', 'have', 'been',
+  'they', 'their', 'about', 'would', 'could', 'should', 'were', 'will',
+  'can', 'did', 'does', 'into', 'your', 'you', 'our', 'more', 'like',
+  'than', 'think', 'players', 'player', 'say', 'says', 'said', 'feel',
+  'feels', 'tell', 'give', 'make', 'take', 'want', 'need', 'there',
+  'some', 'other', 'most', 'much', 'many', 'very', 'just', 'also',
+  'only', 'but', 'not', 'all', 'any', 'its', 'it', 'be', 'has', 'do',
+  'an', 'we', 'in', 'on', 'to', 'of', 'at', 'by',
+]);
+
+function basicKeywords(question: string): string[] {
+  return [...new Set(
+    question
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length >= 4 && !STOP_WORDS.has(w)),
+  )];
+}
+
+function sanitizeFtsKeywords(words: string[]): string {
+  return words
+    .map(k => k.replace(/["*()\-^:]/g, ' ').trim())
+    .filter(k => k.length >= 2)
+    .join(' OR ');
+}
+
+/**
+ * Use GPT to extract relevant FTS5 search keywords from a question.
+ * Returns an FTS5 OR query string (e.g., "submarine OR torpedo OR destroyer").
+ * Falls back to stop-word-based extraction if the API is unavailable.
+ */
+export async function extractKeywordsForSearch(question: string): Promise<string> {
+  const fallback = sanitizeFtsKeywords(basicKeywords(question));
+
+  if (!config.openAiApiKey) return fallback;
+
+  try {
+    const response = await getClient().chat.completions.create({
+      model: 'gpt-4o-mini',
+      temperature: 0,
+      max_tokens: 80,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You are a search query builder for a World of Warships Discord community database. ' +
+            'Extract the most important search terms from the user\'s question. ' +
+            'Return ONLY a JSON object: {"keywords": ["word1", "word2", ...]}. ' +
+            'Include specific ship names, game mechanics, modes, and relevant nouns. ' +
+            '3-8 keywords, no stop words, no punctuation inside keywords.',
+        },
+        { role: 'user', content: question },
+      ],
+    });
+
+    const raw = response.choices[0]?.message?.content ?? '{}';
+    const parsed = JSON.parse(raw) as { keywords?: unknown };
+    const kws = Array.isArray(parsed.keywords)
+      ? (parsed.keywords as unknown[]).filter((k): k is string => typeof k === 'string')
+      : [];
+
+    if (kws.length === 0) return fallback;
+    return sanitizeFtsKeywords(kws);
+  } catch {
+    return fallback;
+  }
+}
+
 export async function answerQuestion(
   messages: string[],
   question: string,

@@ -154,7 +154,7 @@ app.post('/api/chat', (req: Request, res: Response) => {
     res.status(429).json({ error: 'Too many chat requests — wait a moment and try again' });
     return;
   }
-  const { question, windowHours = 24, collectCap = 3000 } = req.body as {
+  const { question, windowHours = 0, collectCap = 3000 } = req.body as {
     question: string;
     windowHours: number;
     collectCap: number;
@@ -170,10 +170,12 @@ app.post('/api/chat', (req: Request, res: Response) => {
     return;
   }
 
-  const cappedHours = Math.min(Math.max(Number(windowHours) || 24, 1), 720);
+  // windowHours = 0 means "all time" (no cutoff); clamp to [0, 720]
+  const cappedHours = Math.min(Math.max(Number(windowHours), 0), 720);
   const cappedCap = Math.min(Math.max(Number(collectCap) || 3000, 50), 10_000);
 
-  logger.info(`[dashboard] Chat queued - window: ${cappedHours}h, cap: ${cappedCap}, q: "${question}"`);
+  const windowLabel = cappedHours ? `${cappedHours}h` : 'all time';
+  logger.info(`[dashboard] Chat queued - window: ${windowLabel}, cap: ${cappedCap}, q: "${question}"`);
   const job = createChatJob(question.trim(), cappedHours, cappedCap);
   res.status(202).json(job);
 });

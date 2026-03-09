@@ -1,32 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { config } from '../config';
-import { logger } from '../logger';
-import { countIndexedMessages, queryIndexedMessages } from '../store/messageDb';
-
-// Minimum messages in the index before we trust it over the Discord API
-const MIN_INDEX_MESSAGES = 500;
-
-const STOP_WORDS = new Set([
-  'what', 'how', 'when', 'where', 'why', 'who', 'which', 'are', 'is',
-  'the', 'and', 'for', 'with', 'that', 'this', 'from', 'have', 'been',
-  'they', 'their', 'about', 'would', 'could', 'should', 'were', 'will',
-  'can', 'did', 'does', 'into', 'your', 'you', 'our', 'more', 'like',
-  'than', 'think', 'players', 'player', 'say', 'says', 'said', 'feel',
-  'feels', 'tell', 'give', 'make', 'take', 'want', 'need', 'there',
-  'some', 'other', 'most', 'much', 'many', 'very', 'just', 'also',
-  'only', 'but', 'not', 'all', 'any', 'its', 'it', 'be', 'has', 'do',
-  'an', 'we', 'in', 'on', 'to', 'of', 'at', 'by',
-]);
-
-function extractKeywords(question: string): string[] {
-  return [...new Set(
-    question
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .split(/\s+/)
-      .filter(w => w.length >= 4 && !STOP_WORDS.has(w)),
-  )];
-}
 import {
   ChatJobRow,
   completeChatJob,
@@ -38,6 +10,12 @@ import {
   listChatJobs,
   updateChatJobStatus,
 } from '../store/db';
+import { config } from '../config';
+import { logger } from '../logger';
+import { countIndexedMessages, searchMessagesFts } from '../store/messageDb';
+
+// Minimum messages in the index before we trust it over the Discord API
+const MIN_INDEX_MESSAGES = 500;
 
 const activeJobs = new Set<string>();
 
@@ -149,34 +127,39 @@ async function runChatJob(jobId: string): Promise<void> {
     }
 
     updateChatJobStatus(jobId, 'running');
-    logger.info(`[chat-job] Started ${jobId} (${job.window_hours}h, cap ${job.collect_cap})`);
+    const windowLabel = job.window_hours ? `${job.window_hours}h` : 'all time';
+    logger.info(`[chat-job] Started ${jobId} (window: ${windowLabel}, cap: ${job.collect_cap})`);
 
-    const { answerQuestion } = await import('../api/openai');
+    const { answerQuestion, extractKeywordsForSearch } = await import('../api/openai');
 
-    const keywords     = extractKeywords(job.question);
-    const indexedCount = countIndexedMessages(job.window_hours);
+    // ── Pass 1: extract FTS5 search keywords from the question via GPT ──────
+    const ftsQuery     = await extractKeywordsForSearch(job.question);
+    const indexedCount = countIndexedMessages(job.window_hours || undefined);
     const useIndex     = indexedCount >= MIN_INDEX_MESSAGES;
 
     let messages: string[];
 
     if (useIndex) {
-      messages = queryIndexedMessages(
+      // ── Pass 2: FTS5 BM25 search — most relevant messages ranked first ────
+      messages = searchMessagesFts(
+        ftsQuery,
         job.window_hours,
         config.sentimentChannelIds,
         job.collect_cap,
-        keywords,
       );
       logger.info(
-        `[chat-job] Using index (${indexedCount} msgs in window). Keywords: [${keywords.join(', ')}]. Returning ${messages.length}`,
+        `[chat-job] FTS search (${indexedCount} indexed). Query: "${ftsQuery}". Retrieved: ${messages.length}`,
       );
     } else {
+      // Fall back to live Discord API collection when the index is sparse
+      const apiWindowHours = job.window_hours || 24; // default 24h for live fetch
       logger.info(
-        `[chat-job] Index has only ${indexedCount} msgs in ${job.window_hours}h window — falling back to Discord API`,
+        `[chat-job] Index has only ${indexedCount} msgs — falling back to Discord API (${apiWindowHours}h)`,
       );
       const { collectMessagesForWindow } = await import('../collectors/messageCollector');
       messages = await collectMessagesForWindow(
         config.sentimentChannelIds,
-        job.window_hours,
+        apiWindowHours,
         job.collect_cap,
       );
     }

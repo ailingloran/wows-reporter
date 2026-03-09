@@ -26,6 +26,19 @@ CREATE INDEX IF NOT EXISTS idx_msg_time
 
 CREATE INDEX IF NOT EXISTS idx_msg_channel_time
   ON discord_messages(channel_id, created_at DESC);
+
+-- FTS5 index for fast, ranked full-text search over message content.
+-- content='discord_messages' makes this a "content table" — FTS only stores
+-- the rowid; actual text is read from discord_messages when needed.
+CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts
+  USING fts5(content, content='discord_messages', content_rowid='rowid');
+
+-- Keep FTS in sync with new inserts (updates/deletes not needed — we never
+-- modify or delete indexed messages).
+CREATE TRIGGER IF NOT EXISTS messages_fts_ai
+  AFTER INSERT ON discord_messages BEGIN
+    INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+  END;
 `;
 
 export function initMessageDb(): void {
@@ -42,6 +55,19 @@ export function initMessageDb(): void {
   const { total } = msgDb
     .prepare('SELECT COUNT(*) AS total FROM discord_messages')
     .get() as { total: number };
+
+  // Populate FTS index from existing rows on first run after adding FTS support.
+  // After that, the trigger keeps it in sync automatically.
+  if (total > 0) {
+    const { c: ftsCount } = msgDb
+      .prepare('SELECT COUNT(*) AS c FROM messages_fts')
+      .get() as { c: number };
+    if (ftsCount === 0) {
+      logger.info('[messageDb] FTS index is empty — rebuilding from existing messages...');
+      rebuildFts();
+      logger.info('[messageDb] FTS rebuild complete');
+    }
+  }
 
   logger.info(`[messageDb] Opened ${dbPath} — ${total} messages indexed`);
 }
@@ -107,16 +133,109 @@ export function countIndexedMessages(windowHours?: number): number {
   ).c;
 }
 
+// ── FTS5 helpers ──────────────────────────────────────────────────────────────
+
 /**
- * Query messages for a chat job.
+ * Rebuild the FTS5 index from scratch, reading all content from discord_messages.
+ * Called automatically on first startup after the FTS table is created.
+ */
+export function rebuildFts(): void {
+  db().exec(`INSERT INTO messages_fts(messages_fts) VALUES('rebuild')`);
+}
+
+/**
+ * Sanitise keyword strings into a safe FTS5 OR query.
+ * Removes FTS5 special characters and joins with OR.
+ */
+function buildFtsQuery(keywords: string[]): string {
+  return keywords
+    .map(k => k.replace(/["*()\-^:]/g, ' ').trim())
+    .filter(k => k.length >= 2)
+    .join(' OR ');
+}
+
+/**
+ * Search messages using FTS5 BM25 ranking.
+ *
+ * Returns up to `limit` messages most relevant to `ftsQuery`, filtered by
+ * channel and optionally a time window (windowHours = 0 means all time).
+ *
+ * Results are ordered by BM25 relevance score (most relevant first).
+ * If ftsQuery is empty, falls back to a random sample from the window.
+ */
+export function searchMessagesFts(
+  ftsQuery:    string,
+  windowHours: number,
+  channelIds:  string[],
+  limit:       number,
+): string[] {
+  if (channelIds.length === 0) return [];
+
+  const chPh = channelIds.map(() => '?').join(', ');
+
+  // No FTS query — return random sample from the time window
+  if (!ftsQuery.trim()) {
+    if (!windowHours) {
+      return (
+        db()
+          .prepare(`SELECT content FROM discord_messages WHERE channel_id IN (${chPh}) ORDER BY RANDOM() LIMIT ?`)
+          .all(...channelIds, limit) as { content: string }[]
+      ).map(r => r.content);
+    }
+    const cutoff = Date.now() - windowHours * 3_600_000;
+    return (
+      db()
+        .prepare(
+          `SELECT content FROM discord_messages
+           WHERE created_at >= ? AND channel_id IN (${chPh})
+           ORDER BY RANDOM() LIMIT ?`,
+        )
+        .all(cutoff, ...channelIds, limit) as { content: string }[]
+    ).map(r => r.content);
+  }
+
+  // FTS search — join with discord_messages to apply channel + time filters
+  if (!windowHours) {
+    // All time — no cutoff
+    return (
+      db()
+        .prepare(
+          `SELECT dm.content
+           FROM messages_fts
+           JOIN discord_messages dm ON messages_fts.rowid = dm.rowid
+           WHERE messages_fts MATCH ?
+             AND dm.channel_id IN (${chPh})
+           ORDER BY bm25(messages_fts)
+           LIMIT ?`,
+        )
+        .all(ftsQuery, ...channelIds, limit) as { content: string }[]
+    ).map(r => r.content);
+  }
+
+  const cutoff = Date.now() - windowHours * 3_600_000;
+  return (
+    db()
+      .prepare(
+        `SELECT dm.content
+         FROM messages_fts
+         JOIN discord_messages dm ON messages_fts.rowid = dm.rowid
+         WHERE messages_fts MATCH ?
+           AND dm.created_at >= ?
+           AND dm.channel_id IN (${chPh})
+         ORDER BY bm25(messages_fts)
+         LIMIT ?`,
+      )
+      .all(ftsQuery, cutoff, ...channelIds, limit) as { content: string }[]
+  ).map(r => r.content);
+}
+
+/**
+ * Query messages for a chat job (legacy LIKE-based approach, kept for sentiment reports).
  *
  * Strategy:
  *   1. If keywords are provided, fetch keyword-matching messages first (LIKE scan).
  *   2. Pad up to `limit` with random non-matching messages from the same window.
  *   3. If no keywords, return a random sample from the window.
- *
- * This ensures GPT sees the most relevant messages while still providing
- * broader context from the rest of the community conversation.
  */
 export function queryIndexedMessages(
   windowHours: number,
@@ -126,19 +245,22 @@ export function queryIndexedMessages(
 ): string[] {
   if (channelIds.length === 0) return [];
 
-  const cutoff = Date.now() - windowHours * 3_600_000;
+  const cutoff = windowHours ? Date.now() - windowHours * 3_600_000 : 0;
   const chPh   = channelIds.map(() => '?').join(', ');
+
+  const timeFilter = cutoff ? 'AND created_at >= ?' : '';
+  const baseParams = cutoff ? [cutoff, ...channelIds] : [...channelIds];
 
   if (keywords.length === 0) {
     return (
       db()
         .prepare(
           `SELECT content FROM discord_messages
-           WHERE created_at >= ? AND channel_id IN (${chPh})
+           WHERE channel_id IN (${chPh}) ${timeFilter}
            ORDER BY RANDOM()
            LIMIT ?`,
         )
-        .all(cutoff, ...channelIds, limit) as { content: string }[]
+        .all(...baseParams, limit) as { content: string }[]
     ).map(r => r.content);
   }
 
@@ -152,12 +274,12 @@ export function queryIndexedMessages(
     db()
       .prepare(
         `SELECT content FROM discord_messages
-         WHERE created_at >= ? AND channel_id IN (${chPh})
+         WHERE channel_id IN (${chPh}) ${timeFilter}
            AND (${likeClause})
          ORDER BY RANDOM()
          LIMIT ?`,
       )
-      .all(cutoff, ...channelIds, ...likeParams, limit) as { content: string }[]
+      .all(...baseParams, ...likeParams, limit) as { content: string }[]
   ).map(r => r.content);
 
   if (matching.length >= limit) return matching.slice(0, limit);
@@ -168,12 +290,12 @@ export function queryIndexedMessages(
     db()
       .prepare(
         `SELECT content FROM discord_messages
-         WHERE created_at >= ? AND channel_id IN (${chPh})
+         WHERE channel_id IN (${chPh}) ${timeFilter}
            AND (${notLikeClause})
          ORDER BY RANDOM()
          LIMIT ?`,
       )
-      .all(cutoff, ...channelIds, ...likeParams, remaining) as { content: string }[]
+      .all(...baseParams, ...likeParams, remaining) as { content: string }[]
   ).map(r => r.content);
 
   return [...matching, ...padding];
