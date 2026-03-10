@@ -25,6 +25,8 @@ const DEFAULTS: Record<string, string> = {
   sentiment_message_limit: String(config.sentimentMessageLimit),
   sentiment_channel_ids:   config.sentimentChannelIds.join(','),
   min_index_messages:      '500',
+  staff_channel_id:        config.discordStaffChannelId,
+  monthly_channel_id:      config.discordMonthlyChannelId,
 };
 
 export function initSettings(): void {

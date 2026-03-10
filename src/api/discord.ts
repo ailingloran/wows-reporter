@@ -18,6 +18,7 @@ import {
 } from 'discord.js';
 import { config } from '../config';
 import { logger } from '../logger';
+import { getSetting } from '../store/settingsDb';
 
 let discordClient: Client;
 
@@ -72,7 +73,8 @@ export async function initDiscordClient(): Promise<Client> {
 
 /** Post the daily report embed to the staff channel. */
 export async function postDailyReport(embed: EmbedBuilder): Promise<void> {
-  const channel = await getTextChannel(config.discordStaffChannelId);
+  const channelId = getSetting('staff_channel_id', config.discordStaffChannelId);
+  const channel = await getTextChannel(channelId);
   await channel.send({ embeds: [embed] });
   logger.info('[discord] Daily report posted');
 }
@@ -82,7 +84,8 @@ export async function postMonthlyDraft(
   embed: EmbedBuilder,
   row: ActionRowBuilder<ButtonBuilder>,
 ): Promise<Message> {
-  const channel = await getTextChannel(config.discordMonthlyChannelId);
+  const channelId = getSetting('monthly_channel_id', config.discordMonthlyChannelId);
+  const channel = await getTextChannel(channelId);
   const msg = await channel.send({
     content: '📋 **Monthly Report Draft** — Please review and approve below.',
     embeds:  [embed],
