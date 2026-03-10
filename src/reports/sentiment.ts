@@ -9,6 +9,7 @@ import { EmbedBuilder } from 'discord.js';
 import { config } from '../config';
 import { logger } from '../logger';
 import { queryIndexedMessages } from '../store/messageDb';
+import { getSetting } from '../store/settingsDb';
 import { collectRecentMessages } from '../collectors/messageCollector';
 import { analyseCommunityPulse } from '../api/openai';
 import { postDailyReport } from '../api/discord';
@@ -23,8 +24,15 @@ export async function runSentimentReport(source: SentimentSource = 'db'): Promis
     logger.warn('[sentiment] OPENAI_API_KEY not set — Community Pulse report skipped');
     return;
   }
-  if (config.sentimentChannelIds.length === 0) {
-    logger.warn('[sentiment] SENTIMENT_CHANNEL_IDS not configured — Community Pulse report skipped');
+  // Read channels + limit from settings DB (falls back to env var defaults)
+  const channelIds = getSetting('sentiment_channel_ids', config.sentimentChannelIds.join(','))
+    .split(',').map(s => s.trim()).filter(Boolean);
+  const messageLimit = parseInt(
+    getSetting('sentiment_message_limit', String(config.sentimentMessageLimit)), 10,
+  );
+
+  if (channelIds.length === 0) {
+    logger.warn('[sentiment] No sentiment channels configured — Community Pulse report skipped');
     return;
   }
 
@@ -34,8 +42,8 @@ export async function runSentimentReport(source: SentimentSource = 'db'): Promis
   // 'db'   → reads from the on-disk SQLite index (fast, same as /api/chat)
   // 'live' → paginates the Discord REST API in real-time (slower but fresh)
   const messages = source === 'live'
-    ? await collectRecentMessages(config.sentimentChannelIds)
-    : queryIndexedMessages(24, config.sentimentChannelIds, config.sentimentMessageLimit, []);
+    ? await collectRecentMessages(channelIds)
+    : queryIndexedMessages(24, channelIds, messageLimit, []);
 
   if (messages.length < 10) {
     logger.warn(`[sentiment] Only ${messages.length} messages found — not enough data, skipping`);

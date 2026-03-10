@@ -16,7 +16,9 @@ import {
   getSentimentReports,
   getSnapshotsBetween,
 } from '../store/db';
-import { countIndexedMessages } from '../store/messageDb';
+import { countIndexedMessages, getFtsHealth, rebuildFts } from '../store/messageDb';
+import { getAllSettings, setSetting } from '../store/settingsDb';
+import { rescheduleReport } from '../scheduler';
 import { createChatJob, getChatHistoryPage, getChatJobResponse, removeChatJob } from './chatJobs';
 
 const app = express();
@@ -236,6 +238,84 @@ app.post('/api/trigger/sentiment/live', (_req: Request, res: Response) => {
 
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', uptime: process.uptime() });
+});
+
+// ── Settings ──────────────────────────────────────────────────────────────────
+
+app.get('/api/settings', (_req: Request, res: Response) => {
+  try {
+    res.json(getAllSettings());
+  } catch (error) {
+    logger.error('[dashboard] /api/settings GET error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/settings', (req: Request, res: Response) => {
+  try {
+    const updates = req.body as Record<string, string>;
+    const hourFields: Array<[string, 'daily' | 'monthly' | 'sentiment']> = [
+      ['daily_hour', 'daily'],
+      ['monthly_hour', 'monthly'],
+      ['sentiment_hour', 'sentiment'],
+    ];
+
+    for (const [key, value] of Object.entries(updates)) {
+      setSetting(key, String(value));
+    }
+
+    // Hot-reload cron if an hour changed
+    for (const [key, type] of hourFields) {
+      if (key in updates) {
+        const hour = parseInt(String(updates[key]), 10);
+        if (!isNaN(hour)) rescheduleReport(type, hour);
+      }
+    }
+
+    // Hot-reload indexer channel list if channels changed
+    if ('sentiment_channel_ids' in updates) {
+      const ids = String(updates['sentiment_channel_ids'])
+        .split(',').map(s => s.trim()).filter(Boolean);
+      import('../indexer/messageIndexer')
+        .then(({ refreshChannels }) => refreshChannels(ids))
+        .catch(() => {/* indexer not started in test/backfill modes */});
+    }
+
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('[dashboard] /api/settings POST error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── Index health + maintenance ────────────────────────────────────────────────
+
+app.get('/api/index/health', (_req: Request, res: Response) => {
+  try {
+    res.json(getFtsHealth());
+  } catch (error) {
+    logger.error('[dashboard] /api/index/health error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/index/rebuild', (_req: Request, res: Response) => {
+  try {
+    rebuildFts();
+    logger.info('[dashboard] FTS index rebuilt via dashboard');
+    res.json({ ok: true, message: 'FTS index rebuilt' });
+  } catch (error) {
+    logger.error('[dashboard] /api/index/rebuild error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/backfill', (req: Request, res: Response) => {
+  const hours = Math.min(Math.max(parseInt((req.body as { hours?: string }).hours ?? '48', 10), 1), 720);
+  import('../indexer/messageIndexer').then(({ backfillMessages }) => {
+    backfillMessages(hours).catch((err: unknown) => logger.error('[dashboard] Backfill failed:', err));
+    res.json({ ok: true, message: `Backfill started for last ${hours}h` });
+  }).catch(() => res.status(500).json({ error: 'Failed to load indexer module' }));
 });
 
 export function startDashboard(): void {

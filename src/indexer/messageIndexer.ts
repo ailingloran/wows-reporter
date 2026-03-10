@@ -22,9 +22,17 @@ import { isIndexable } from './messageFilter';
 
 // ── Real-time listener ────────────────────────────────────────────────────────
 
+let activeChannelSet = new Set<string>();
+
+/** Hot-reload the channel list without restarting the bot. */
+export function refreshChannels(channelIds: string[]): void {
+  activeChannelSet = new Set(channelIds);
+  logger.info(`[messageIndexer] Channel list refreshed — ${activeChannelSet.size} channel(s)`);
+}
+
 export function startMessageIndexer(): void {
-  const client     = getDiscordClient();
-  const channelSet = new Set(config.sentimentChannelIds);
+  const client = getDiscordClient();
+  activeChannelSet = new Set(config.sentimentChannelIds);
 
   client.on('messageCreate', (message: Message) => {
     if (message.author.bot) return;
@@ -35,8 +43,8 @@ export function startMessageIndexer(): void {
       ? (message.channel.parentId ?? message.channelId)
       : message.channelId;
 
-    if (!channelSet.has(rootChannelId)) return;
-    if (!isIndexable(message.content))  return;
+    if (!activeChannelSet.has(rootChannelId)) return;
+    if (!isIndexable(message.content))        return;
 
     insertMessage({
       message_id: message.id,
@@ -47,7 +55,7 @@ export function startMessageIndexer(): void {
     });
   });
 
-  logger.info(`[messageIndexer] Real-time indexer active on ${channelSet.size} channel(s)`);
+  logger.info(`[messageIndexer] Real-time indexer active on ${activeChannelSet.size} channel(s)`);
 }
 
 // ── Backfill ──────────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@
 import 'dotenv/config';
 import { initDb } from './store/db';
 import { initMessageDb } from './store/messageDb';
+import { initSettings } from './store/settingsDb';
 import { initDiscordClient, getDiscordClient } from './api/discord';
 import { registerSchedules } from './scheduler';
 import { runDailyReport } from './reports/daily';
@@ -21,6 +22,7 @@ async function main() {
   // 1. Initialise SQLite databases
   initDb();
   initMessageDb();
+  initSettings();
   logger.info('Databases initialised');
 
   // 2. Connect Discord bot
@@ -79,12 +81,9 @@ async function main() {
   registerSchedules();
   logger.info(`Cron jobs registered. Daily: "${config.dailyCron}", Monthly: "${config.monthlyCron}" (Europe/Berlin)`);
 
-  // 4. Start optional web dashboard
-  if (config.dailyDelivery === 'dashboard' || config.dailyDelivery === 'both' ||
-      config.monthlyDelivery === 'dashboard' || config.monthlyDelivery === 'both') {
-    startDashboard();
-    logger.info(`Dashboard listening on port ${config.dashboardPort}`);
-  }
+  // 4. Start web dashboard (always — needed for settings API)
+  startDashboard();
+  logger.info(`Dashboard listening on port ${config.dashboardPort}`);
 
   // 5. Start real-time message indexer
   startMessageIndexer();

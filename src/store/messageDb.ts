@@ -143,6 +143,25 @@ export function rebuildFts(): void {
   db().exec(`INSERT INTO messages_fts(messages_fts) VALUES('rebuild')`);
 }
 
+export interface FtsHealth {
+  totalMessages:  number;
+  ftsCount:       number;
+  lastIndexedAt:  number | null; // Unix ms
+}
+
+export function getFtsHealth(): FtsHealth {
+  const totalMessages = (
+    db().prepare('SELECT COUNT(*) AS c FROM discord_messages').get() as { c: number }
+  ).c;
+  const ftsCount = (
+    db().prepare('SELECT COUNT(*) AS c FROM messages_fts').get() as { c: number }
+  ).c;
+  const row = db()
+    .prepare('SELECT MAX(created_at) AS t FROM discord_messages')
+    .get() as { t: number | null };
+  return { totalMessages, ftsCount, lastIndexedAt: row.t ?? null };
+}
+
 /**
  * Sanitise keyword strings into a safe FTS5 OR query.
  * Removes FTS5 special characters and joins with OR.

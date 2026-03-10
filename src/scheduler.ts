@@ -1,57 +1,111 @@
 /**
  * Cron job definitions.
  * All jobs use timezone: 'Europe/Berlin' so DST transitions are handled automatically.
- * CET = UTC+1 (winter), CEST = UTC+2 (summer).
+ * CET = UTC+1 (winter), CEST = UTC+2 (summer) — same as Prague.
+ *
+ * Hours are read from bot_settings at startup and can be hot-reloaded via
+ * rescheduleReport() without restarting the bot.
  */
 
 import cron from 'node-cron';
-import { config } from './config';
 import { logger } from './logger';
-import { runDailyReport } from './reports/daily';
-import { runMonthlyReport } from './reports/monthly';
-import { snapshotPlayerRole } from './collectors/memberTracker';
+import { getSetting } from './store/settingsDb';
 import { getDiscordClient } from './api/discord';
 
 const TZ = 'Europe/Berlin';
 
+// ── Task references (kept so they can be stopped on reschedule) ───────────────
+
+let dailyTask:     cron.ScheduledTask | null = null;
+let monthlyTask:   cron.ScheduledTask | null = null;
+let sentimentTask: cron.ScheduledTask | null = null;
+
+// ── Callbacks (named so they can be reused when rescheduling) ─────────────────
+
+async function dailyCallback() {
+  if (getSetting('daily_enabled', 'true') !== 'true') {
+    logger.info('[scheduler] Daily report skipped (disabled via settings)');
+    return;
+  }
+  logger.info('[scheduler] Daily report triggered');
+  try {
+    const { snapshotPlayerRole } = await import('./collectors/memberTracker');
+    const { runDailyReport }    = await import('./reports/daily');
+    const client = getDiscordClient();
+    const { config } = await import('./config');
+    const guild = await client.guilds.fetch(config.statbotGuildId);
+    await snapshotPlayerRole(guild);
+    logger.info('[scheduler] @Player role snapshot complete');
+    await runDailyReport();
+    logger.info('[scheduler] Daily report complete');
+  } catch (err) {
+    logger.error('[scheduler] Daily report failed:', err);
+  }
+}
+
+async function monthlyCallback() {
+  if (getSetting('monthly_enabled', 'true') !== 'true') {
+    logger.info('[scheduler] Monthly report skipped (disabled via settings)');
+    return;
+  }
+  logger.info('[scheduler] Monthly report triggered');
+  try {
+    const { runMonthlyReport } = await import('./reports/monthly');
+    await runMonthlyReport();
+    logger.info('[scheduler] Monthly report complete');
+  } catch (err) {
+    logger.error('[scheduler] Monthly report failed:', err);
+  }
+}
+
+async function sentimentCallback() {
+  if (getSetting('sentiment_enabled', 'true') !== 'true') {
+    logger.info('[scheduler] Community Pulse skipped (disabled via settings)');
+    return;
+  }
+  logger.info('[scheduler] Community Pulse report triggered');
+  try {
+    const { runSentimentReport } = await import('./reports/sentiment');
+    await runSentimentReport();
+    logger.info('[scheduler] Community Pulse report complete');
+  } catch (err) {
+    logger.error('[scheduler] Community Pulse report failed:', err);
+  }
+}
+
+// ── Registration ──────────────────────────────────────────────────────────────
+
 export function registerSchedules(): void {
-  // ── Daily report ────────────────────────────────────────────────────────────
-  // Snapshot the @Player role count first so the report always has fresh data.
-  cron.schedule(config.dailyCron, async () => {
-    logger.info('[scheduler] Daily report triggered');
-    try {
-      const client = getDiscordClient();
-      const guild  = await client.guilds.fetch(config.statbotGuildId);
-      await snapshotPlayerRole(guild);
-      logger.info('[scheduler] @Player role snapshot complete');
+  const dh = parseInt(getSetting('daily_hour',     '0'),  10);
+  const mh = parseInt(getSetting('monthly_hour',   '0'),  10);
+  const sh = parseInt(getSetting('sentiment_hour', '17'), 10);
 
-      await runDailyReport();
-      logger.info('[scheduler] Daily report complete');
-    } catch (err) {
-      logger.error('[scheduler] Daily report failed:', err);
-    }
-  }, { timezone: TZ });
+  dailyTask     = cron.schedule(`0 ${dh} * * *`,   dailyCallback,     { timezone: TZ });
+  monthlyTask   = cron.schedule(`0 ${mh} 1 * *`,   monthlyCallback,   { timezone: TZ });
+  sentimentTask = cron.schedule(`0 ${sh} * * *`,   sentimentCallback, { timezone: TZ });
 
-  // ── Monthly report ──────────────────────────────────────────────────────────
-  cron.schedule(config.monthlyCron, async () => {
-    logger.info('[scheduler] Monthly report triggered');
-    try {
-      await runMonthlyReport();
-      logger.info('[scheduler] Monthly report complete');
-    } catch (err) {
-      logger.error('[scheduler] Monthly report failed:', err);
-    }
-  }, { timezone: TZ });
+  logger.info(
+    `[scheduler] Daily at ${dh}:00, Monthly at ${mh}:00 on 1st, ` +
+    `Community Pulse at ${sh}:00 (Europe/Berlin)`,
+  );
+}
 
-  // ── Community Pulse (sentiment) report ──────────────────────────────────────
-  cron.schedule(config.sentimentCron, async () => {
-    logger.info('[scheduler] Community Pulse report triggered');
-    try {
-      const { runSentimentReport } = await import('./reports/sentiment');
-      await runSentimentReport();
-      logger.info('[scheduler] Community Pulse report complete');
-    } catch (err) {
-      logger.error('[scheduler] Community Pulse report failed:', err);
-    }
-  }, { timezone: TZ });
+// ── Hot-reload ────────────────────────────────────────────────────────────────
+
+export function rescheduleReport(type: 'daily' | 'monthly' | 'sentiment', hour: number): void {
+  const h = Math.max(0, Math.min(23, Math.round(hour)));
+
+  if (type === 'daily') {
+    dailyTask?.stop();
+    dailyTask = cron.schedule(`0 ${h} * * *`, dailyCallback, { timezone: TZ });
+    logger.info(`[scheduler] Daily rescheduled to ${h}:00 (Europe/Berlin)`);
+  } else if (type === 'monthly') {
+    monthlyTask?.stop();
+    monthlyTask = cron.schedule(`0 ${h} 1 * *`, monthlyCallback, { timezone: TZ });
+    logger.info(`[scheduler] Monthly rescheduled to ${h}:00 on 1st (Europe/Berlin)`);
+  } else {
+    sentimentTask?.stop();
+    sentimentTask = cron.schedule(`0 ${h} * * *`, sentimentCallback, { timezone: TZ });
+    logger.info(`[scheduler] Community Pulse rescheduled to ${h}:00 (Europe/Berlin)`);
+  }
 }

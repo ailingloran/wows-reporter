@@ -13,9 +13,7 @@ import {
 import { config } from '../config';
 import { logger } from '../logger';
 import { countIndexedMessages, searchMessagesFts } from '../store/messageDb';
-
-// Minimum messages in the index before we trust it over the Discord API
-const MIN_INDEX_MESSAGES = 500;
+import { getSetting } from '../store/settingsDb';
 
 const activeJobs = new Set<string>();
 
@@ -134,8 +132,9 @@ async function runChatJob(jobId: string): Promise<void> {
 
     // ── Pass 1: extract FTS5 search keywords from the question via GPT ──────
     const ftsQuery     = await extractKeywordsForSearch(job.question);
+    const minIndex     = parseInt(getSetting('min_index_messages', '500'), 10);
     const indexedCount = countIndexedMessages(job.window_hours || undefined);
-    const useIndex     = indexedCount >= MIN_INDEX_MESSAGES;
+    const useIndex     = indexedCount >= minIndex;
 
     let messages: string[];
 
