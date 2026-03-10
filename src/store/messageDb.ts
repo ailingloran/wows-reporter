@@ -249,7 +249,7 @@ export function queryIndexedMessages(
   const chPh   = channelIds.map(() => '?').join(', ');
 
   const timeFilter = cutoff ? 'AND created_at >= ?' : '';
-  const baseParams = cutoff ? [cutoff, ...channelIds] : [...channelIds];
+  const baseParams = cutoff ? [...channelIds, cutoff] : [...channelIds];
 
   if (keywords.length === 0) {
     return (
