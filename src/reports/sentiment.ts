@@ -11,12 +11,103 @@ import { logger } from '../logger';
 import { queryIndexedMessages } from '../store/messageDb';
 import { getSetting } from '../store/settingsDb';
 import { collectRecentMessages } from '../collectors/messageCollector';
-import { analyseCommunityPulse } from '../api/openai';
+import { analyseCommunityPulse, PulseItem, PulseResult } from '../api/openai';
 import { postDailyReport } from '../api/discord';
-import { insertSentimentReport } from '../store/db';
+import { getSentimentReports, insertSentimentReport, SentimentReportRow } from '../store/db';
 import { formatDate } from './formatters';
 
 export type SentimentSource = 'db' | 'live';
+
+// ── Delta computation helpers ─────────────────────────────────────────────────
+
+// Words to ignore when matching pain points across reports
+const DELTA_IGNORE = new Set([
+  'players', 'player', 'about', 'their', 'with', 'from', 'this', 'that',
+  'have', 'been', 'were', 'are', 'the', 'and', 'for', 'discussing',
+  'mentioned', 'saying', 'said', 'game', 'community', 'channel', 'they',
+  'very', 'more', 'some', 'most', 'many', 'when', 'which', 'that',
+]);
+
+function extractSignificantWords(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length >= 4 && !DELTA_IGNORE.has(w)),
+    ),
+  ];
+}
+
+/**
+ * For each pain_point in the current report, check if the same theme appeared
+ * in any of the previous reports. Sets recurring=true and first_seen_days_ago
+ * if at least 2 significant words overlap with a previous pain_point text.
+ */
+function markRecurring(currentItems: PulseItem[], previousReports: SentimentReportRow[]): void {
+  // Build list of {text, date} from previous pain_points
+  const prevPains: { words: string[]; takenAt: string }[] = [];
+  for (const report of previousReports) {
+    if (!report.raw_json) continue;
+    try {
+      const parsed = JSON.parse(report.raw_json) as Partial<PulseResult>;
+      if (!Array.isArray(parsed.pain_points)) continue;
+      for (const pp of parsed.pain_points) {
+        if (pp?.text) {
+          prevPains.push({ words: extractSignificantWords(pp.text), takenAt: report.taken_at });
+        }
+      }
+    } catch { /* skip malformed */ }
+  }
+
+  for (const item of currentItems) {
+    const currentWords = extractSignificantWords(item.text);
+    let bestDaysAgo: number | null = null;
+
+    for (const prev of prevPains) {
+      const overlap = currentWords.filter(w => prev.words.includes(w)).length;
+      if (overlap >= 2) {
+        const daysAgo = Math.round((Date.now() - new Date(prev.takenAt).getTime()) / 86_400_000);
+        if (bestDaysAgo === null || daysAgo > bestDaysAgo) {
+          bestDaysAgo = daysAgo;
+        }
+      }
+    }
+
+    item.recurring = bestDaysAgo !== null;
+    item.first_seen_days_ago = bestDaysAgo;
+  }
+}
+
+// ── Citation enrichment ───────────────────────────────────────────────────────
+
+/**
+ * Build a citations map: 1-based message index → message content.
+ * Only stores messages that are actually cited in the pulse result.
+ */
+function buildCitations(pulse: PulseResult, messages: string[]): Record<number, string> {
+  const citedIndices = new Set<number>();
+  const allItems: PulseItem[] = [
+    ...pulse.topics,
+    ...pulse.pain_points,
+    ...pulse.positives,
+  ];
+  if (pulse.minority_insight) allItems.push(pulse.minority_insight);
+
+  for (const item of allItems) {
+    for (const idx of item.msgs) citedIndices.add(idx);
+  }
+
+  const citations: Record<number, string> = {};
+  for (const idx of citedIndices) {
+    const msg = messages[idx - 1]; // msgs are 1-based
+    if (msg) citations[idx] = msg;
+  }
+  return citations;
+}
+
+// ── Main report ───────────────────────────────────────────────────────────────
 
 export async function runSentimentReport(source: SentimentSource = 'db'): Promise<void> {
   // ── Precondition checks ────────────────────────────────────────────────────
@@ -39,8 +130,6 @@ export async function runSentimentReport(source: SentimentSource = 'db'): Promis
   logger.info(`[sentiment] Starting Community Pulse report (source: ${source})...`);
 
   // ── Collect messages ───────────────────────────────────────────────────────
-  // 'db'   → reads from the on-disk SQLite index (fast, same as /api/chat)
-  // 'live' → paginates the Discord REST API in real-time (slower but fresh)
   const messages = source === 'live'
     ? await collectRecentMessages(channelIds)
     : queryIndexedMessages(24, channelIds, messageLimit, []);
@@ -57,6 +146,14 @@ export async function runSentimentReport(source: SentimentSource = 'db'): Promis
     return;
   }
 
+  // ── Enrich: citations ──────────────────────────────────────────────────────
+  pulse.citations = buildCitations(pulse, messages);
+
+  // ── Enrich: delta (mark recurring pain points) ─────────────────────────────
+  // Load last 3 reports (excluding the one we're about to insert)
+  const previousReports = getSentimentReports(3);
+  markRecurring(pulse.pain_points, previousReports);
+
   // ── Persist to DB ──────────────────────────────────────────────────────────
   const takenAt = new Date().toISOString();
   insertSentimentReport(takenAt, pulse.mood, JSON.stringify(pulse));
@@ -64,9 +161,22 @@ export async function runSentimentReport(source: SentimentSource = 'db'): Promis
   // ── Build embed ────────────────────────────────────────────────────────────
   const today = formatDate(new Date());
 
-  const topicsText    = pulse.topics.map(t => `• ${t.text}`).join('\n')      || '_Nothing notable_';
-  const painText      = pulse.pain_points.map(p => `• ${p.text}`).join('\n') || '_Nothing notable_';
-  const positivesText = pulse.positives.map(p => `• ${p.text}`).join('\n')   || '_Nothing notable_';
+  function formatItem(item: PulseItem, showRecurring = false): string {
+    const authorsNote = item.authors > 1 ? ` *(${item.authors} players)*` : '';
+    const recurringNote =
+      showRecurring && item.recurring
+        ? item.first_seen_days_ago && item.first_seen_days_ago > 1
+          ? ` 🔴 *recurring ${item.first_seen_days_ago}d*`
+          : ' 🔴 *recurring*'
+        : showRecurring && !item.recurring
+          ? ' 🆕'
+          : '';
+    return `• ${item.text}${authorsNote}${recurringNote}`;
+  }
+
+  const topicsText = pulse.topics.map(t => formatItem(t)).join('\n') || '_Nothing notable_';
+  const painText   = pulse.pain_points.map(p => formatItem(p, true)).join('\n') || '_Nothing notable_';
+  const posText    = pulse.positives.map(p => formatItem(p)).join('\n') || '_Nothing notable_';
 
   const moodScore  = Math.min(5, Math.max(1, Math.round(pulse.mood_score ?? 3)));
   const moodBar    = '█'.repeat(moodScore) + '░'.repeat(5 - moodScore);
@@ -89,7 +199,7 @@ export async function runSentimentReport(source: SentimentSource = 'db'): Promis
       },
       {
         name:   '😊 Positives',
-        value:  positivesText,
+        value:  posText,
         inline: true,
       },
       {
@@ -97,17 +207,26 @@ export async function runSentimentReport(source: SentimentSource = 'db'): Promis
         value:  pulse.trending || '_Nothing unusually trending_',
         inline: false,
       },
-      {
-        name:   `🌡️ Mood — ${moodScore}/5  ${moodBar}`,
-        value:  pulse.mood,
-        inline: false,
-      },
-    )
-    .setFooter({ text: 'WoWS Community Reports · AI-generated by OpenAI' })
+    );
+
+  if (pulse.minority_insight) {
+    embed.addFields({
+      name:   '💡 Insightful Minority',
+      value:  `• ${pulse.minority_insight.text}`,
+      inline: false,
+    });
+  }
+
+  embed
+    .addFields({
+      name:   `🌡️ Mood — ${moodScore}/5  ${moodBar}`,
+      value:  pulse.mood,
+      inline: false,
+    })
+    .setFooter({ text: 'WoWS Community Reports · AI-generated by OpenAI · 🔴 recurring  🆕 new today' })
     .setTimestamp();
 
   // ── Post ───────────────────────────────────────────────────────────────────
-  // Reuse postDailyReport since it posts to the same staff channel
   await postDailyReport(embed);
   logger.info('[sentiment] Community Pulse report posted');
 }

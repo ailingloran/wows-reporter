@@ -14,6 +14,50 @@ import { config } from '../config';
 import { logger } from '../logger';
 import { countIndexedMessages, searchMessagesFts } from '../store/messageDb';
 import { getSetting } from '../store/settingsDb';
+import { SessionTurn } from '../api/openai';
+
+// ── Session management ────────────────────────────────────────────────────────
+
+const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours of inactivity
+
+interface SessionData {
+  turns:  SessionTurn[];
+  expiry: number;
+}
+
+const sessionHistory = new Map<string, SessionData>();
+
+function getSessionTurns(sessionId: string): SessionTurn[] {
+  const session = sessionHistory.get(sessionId);
+  if (!session || session.expiry < Date.now()) {
+    sessionHistory.delete(sessionId);
+    return [];
+  }
+  // Refresh TTL on access
+  session.expiry = Date.now() + SESSION_TTL_MS;
+  return [...session.turns];
+}
+
+function appendSessionTurn(sessionId: string, turn: SessionTurn): void {
+  const session = sessionHistory.get(sessionId) ?? { turns: [], expiry: 0 };
+  session.turns.push(turn);
+  // Cap at last 5 turns to avoid context explosion
+  if (session.turns.length > 5) session.turns = session.turns.slice(-5);
+  session.expiry = Date.now() + SESSION_TTL_MS;
+  sessionHistory.set(sessionId, session);
+}
+
+// ── Per-job metadata (session context + channel filter, held in memory) ───────
+
+interface JobMeta {
+  sessionId?:  string;
+  channelIds?: string[];
+  priorTurns:  SessionTurn[];
+}
+
+const jobMeta = new Map<string, JobMeta>();
+
+// ── Public types ──────────────────────────────────────────────────────────────
 
 const activeJobs = new Set<string>();
 
@@ -50,7 +94,13 @@ function toChatJobResponse(job: ChatJobRow): ChatJobResponse {
   };
 }
 
-export function createChatJob(question: string, windowHours: number, collectCap: number): ChatJobResponse {
+export function createChatJob(
+  question:    string,
+  windowHours: number,
+  collectCap:  number,
+  sessionId?:  string,
+  channelIds?: string[],
+): ChatJobResponse {
   const now = new Date().toISOString();
   const job: ChatJobRow = {
     id: randomUUID(),
@@ -66,7 +116,11 @@ export function createChatJob(question: string, windowHours: number, collectCap:
     error: null,
   };
 
+  // Snapshot session turns at job creation time
+  const priorTurns = sessionId ? getSessionTurns(sessionId) : [];
+
   insertChatJob(job);
+  jobMeta.set(job.id, { sessionId, channelIds, priorTurns });
   queueChatJob(job.id);
   return toChatJobResponse(job);
 }
@@ -118,15 +172,23 @@ async function runChatJob(jobId: string): Promise<void> {
   const job = getChatJob(jobId);
   if (!job) return;
 
+  const meta = jobMeta.get(jobId);
+
+  // Resolve channel IDs: use per-job filter if provided, else all configured channels
+  const configuredChannels = getSetting('sentiment_channel_ids', config.sentimentChannelIds.join(','))
+    .split(',').map(s => s.trim()).filter(Boolean);
+  const channelIds = meta?.channelIds?.length ? meta.channelIds : configuredChannels;
+  const priorTurns = meta?.priorTurns ?? [];
+
   try {
-    if (!config.sentimentChannelIds.length) {
+    if (!configuredChannels.length) {
       failChatJob(jobId, 'SENTIMENT_CHANNEL_IDS not configured');
       return;
     }
 
     updateChatJobStatus(jobId, 'running');
     const windowLabel = job.window_hours ? `${job.window_hours}h` : 'all time';
-    logger.info(`[chat-job] Started ${jobId} (window: ${windowLabel}, cap: ${job.collect_cap})`);
+    logger.info(`[chat-job] Started ${jobId} (window: ${windowLabel}, cap: ${job.collect_cap}, channels: ${channelIds.length})`);
 
     const { answerQuestion, extractKeywordsForSearch } = await import('../api/openai');
 
@@ -143,7 +205,7 @@ async function runChatJob(jobId: string): Promise<void> {
       messages = searchMessagesFts(
         ftsQuery,
         job.window_hours,
-        config.sentimentChannelIds,
+        channelIds,
         job.collect_cap,
       );
       logger.info(
@@ -151,13 +213,13 @@ async function runChatJob(jobId: string): Promise<void> {
       );
     } else {
       // Fall back to live Discord API collection when the index is sparse
-      const apiWindowHours = job.window_hours || 24; // default 24h for live fetch
+      const apiWindowHours = job.window_hours || 24;
       logger.info(
         `[chat-job] Index has only ${indexedCount} msgs — falling back to Discord API (${apiWindowHours}h)`,
       );
       const { collectMessagesForWindow } = await import('../collectors/messageCollector');
       messages = await collectMessagesForWindow(
-        config.sentimentChannelIds,
+        channelIds,
         apiWindowHours,
         job.collect_cap,
       );
@@ -169,7 +231,7 @@ async function runChatJob(jobId: string): Promise<void> {
       return;
     }
 
-    const result = await answerQuestion(messages, job.question);
+    const result = await answerQuestion(messages, job.question, priorTurns);
     if ('error' in result) {
       failChatJob(jobId, result.error);
       return;
@@ -177,9 +239,16 @@ async function runChatJob(jobId: string): Promise<void> {
 
     completeChatJob(jobId, result.answer, result.collected, result.analysed);
     logger.info(`[chat-job] Completed ${jobId}. Collected: ${result.collected}, analysed: ${result.analysed}`);
+
+    // Append to session history after successful completion
+    if (meta?.sessionId) {
+      appendSessionTurn(meta.sessionId, { question: job.question, answer: result.answer });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Internal server error';
     failChatJob(jobId, message);
     logger.error(`[chat-job] Failed ${jobId}:`, error);
+  } finally {
+    jobMeta.delete(jobId);
   }
 }

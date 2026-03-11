@@ -14,8 +14,10 @@ import {
   getLastSentimentReport,
   getLastSnapshot,
   getSentimentReports,
+  getSentimentReportTrend,
   getSnapshotsBetween,
 } from '../store/db';
+import { getSetting } from '../store/settingsDb';
 import { countIndexedMessages, getFtsHealth, rebuildFts } from '../store/messageDb';
 import { getAllSettings, setSetting } from '../store/settingsDb';
 import { rescheduleReport } from '../scheduler';
@@ -145,6 +147,40 @@ app.get('/api/sentiment', (req: Request, res: Response) => {
   }
 });
 
+app.get('/api/sentiment/trend', (req: Request, res: Response) => {
+  try {
+    const days = Math.min(Math.max(Number(req.query.days) || 30, 1), 365);
+    res.json(getSentimentReportTrend(days));
+  } catch {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Returns configured sentiment channel IDs with names resolved from Discord
+app.get('/api/sentiment/channels', (_req: Request, res: Response) => {
+  void (async () => {
+    try {
+      const ids = getSetting('sentiment_channel_ids', config.sentimentChannelIds.join(','))
+        .split(',').map(s => s.trim()).filter(Boolean);
+      if (ids.length === 0) { res.json([]); return; }
+
+      const { getDiscordClient } = await import('../api/discord');
+      const client = getDiscordClient();
+      const channels = await Promise.all(ids.map(async id => {
+        try {
+          const ch = await client.channels.fetch(id);
+          return { id, name: ch && 'name' in ch && ch.name ? `#${ch.name}` : id };
+        } catch {
+          return { id, name: id };
+        }
+      }));
+      res.json(channels);
+    } catch {
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  })();
+});
+
 app.get('/api/chat', (req: Request, res: Response) => {
   const page = Math.max(Number(req.query.page) || 1, 1);
   const pageSize = Math.min(Math.max(Number(req.query.pageSize) || 20, 1), 100);
@@ -156,10 +192,12 @@ app.post('/api/chat', (req: Request, res: Response) => {
     res.status(429).json({ error: 'Too many chat requests — wait a moment and try again' });
     return;
   }
-  const { question, windowHours = 0, collectCap = 3000 } = req.body as {
-    question: string;
+  const { question, windowHours = 0, collectCap = 3000, sessionId, channelIds } = req.body as {
+    question:    string;
     windowHours: number;
-    collectCap: number;
+    collectCap:  number;
+    sessionId?:  string;
+    channelIds?: string[];
   };
 
   if (!question?.trim()) {
@@ -167,18 +205,30 @@ app.post('/api/chat', (req: Request, res: Response) => {
     return;
   }
 
-  if (!config.sentimentChannelIds.length) {
+  const configuredChannels = getSetting('sentiment_channel_ids', config.sentimentChannelIds.join(','))
+    .split(',').map(s => s.trim()).filter(Boolean);
+  if (!configuredChannels.length) {
     res.status(400).json({ error: 'SENTIMENT_CHANNEL_IDS not configured' });
     return;
   }
 
   // windowHours = 0 means "all time" (no cutoff); clamp to [0, 720]
   const cappedHours = Math.min(Math.max(Number(windowHours), 0), 720);
-  const cappedCap = Math.min(Math.max(Number(collectCap) || 3000, 50), 10_000);
+  const cappedCap   = Math.min(Math.max(Number(collectCap) || 3000, 50), 10_000);
+
+  // Validate requested channel IDs are a subset of configured ones
+  const validChannelIds = Array.isArray(channelIds)
+    ? channelIds.filter(id => configuredChannels.includes(id))
+    : undefined;
 
   const windowLabel = cappedHours ? `${cappedHours}h` : 'all time';
-  logger.info(`[dashboard] Chat queued - window: ${windowLabel}, cap: ${cappedCap}, q: "${question}"`);
-  const job = createChatJob(question.trim(), cappedHours, cappedCap);
+  logger.info(
+    `[dashboard] Chat queued - window: ${windowLabel}, cap: ${cappedCap}` +
+    `${sessionId ? `, session: ${sessionId.slice(0, 8)}` : ''}` +
+    `${validChannelIds?.length ? `, channels: ${validChannelIds.length}` : ''}` +
+    `, q: "${question}"`,
+  );
+  const job = createChatJob(question.trim(), cappedHours, cappedCap, sessionId, validChannelIds);
   res.status(202).json(job);
 });
 

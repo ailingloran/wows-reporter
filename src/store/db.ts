@@ -149,6 +149,23 @@ export function getSentimentReports(limit = 30): SentimentReportRow[] {
     .all(limit) as SentimentReportRow[];
 }
 
+export function getSentimentReportTrend(days: number): { date: string; mood_score: number }[] {
+  const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
+  const rows = getDb()
+    .prepare(`SELECT taken_at, raw_json FROM sentiment_reports WHERE taken_at >= ? ORDER BY taken_at ASC`)
+    .all(cutoff) as { taken_at: string; raw_json: string | null }[];
+  return rows.flatMap(r => {
+    if (!r.raw_json) return [];
+    try {
+      const parsed = JSON.parse(r.raw_json) as { mood_score?: number };
+      if (typeof parsed.mood_score !== 'number') return [];
+      return [{ date: r.taken_at.slice(0, 10), mood_score: parsed.mood_score }];
+    } catch {
+      return [];
+    }
+  });
+}
+
 export type ChatJobStatus = 'queued' | 'running' | 'completed' | 'failed';
 
 export interface ChatJobRow {
