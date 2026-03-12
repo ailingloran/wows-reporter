@@ -84,26 +84,40 @@ function markRecurring(currentItems: PulseItem[], previousReports: SentimentRepo
 
 /**
  * Build a citations map: 1-based message index → message content.
- * Only stores messages that are actually cited in the pulse result.
+ *
+ * Only stores a citation if the cited message contains at least one significant
+ * word from the item's text. This filters out GPT hallucinated indices where
+ * the cited message is unrelated to the topic it supposedly supports.
  */
 function buildCitations(pulse: PulseResult, messages: string[]): Record<number, string> {
-  const citedIndices = new Set<number>();
+  const citations: Record<number, string> = {};
+
   const allItems: PulseItem[] = [
     ...pulse.topics,
     ...pulse.pain_points,
     ...pulse.positives,
   ];
-  if (pulse.minority_insight) allItems.push(pulse.minority_insight);
 
   for (const item of allItems) {
-    for (const idx of item.msgs) citedIndices.add(idx);
+    const itemWords = extractSignificantWords(item.text);
+    const seenIdx = new Set<number>();
+
+    for (const idx of item.msgs) {
+      if (seenIdx.has(idx)) continue; // skip duplicate indices from GPT
+      seenIdx.add(idx);
+
+      const msg = messages[idx - 1]; // msgs are 1-based
+      if (!msg) continue;
+
+      // Only keep the citation if the message content shares at least one
+      // significant word with the item. Filters irrelevant GPT hallucinations.
+      const msgLower = msg.toLowerCase();
+      if (itemWords.length === 0 || itemWords.some(w => msgLower.includes(w))) {
+        citations[idx] = msg;
+      }
+    }
   }
 
-  const citations: Record<number, string> = {};
-  for (const idx of citedIndices) {
-    const msg = messages[idx - 1]; // msgs are 1-based
-    if (msg) citations[idx] = msg;
-  }
   return citations;
 }
 
@@ -208,14 +222,6 @@ export async function runSentimentReport(source: SentimentSource = 'db'): Promis
         inline: false,
       },
     );
-
-  if (pulse.minority_insight) {
-    embed.addFields({
-      name:   '💡 Insightful Minority',
-      value:  `• ${pulse.minority_insight.text}`,
-      inline: false,
-    });
-  }
 
   embed
     .addFields({

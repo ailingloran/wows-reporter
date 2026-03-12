@@ -17,15 +17,14 @@ export interface PulseItem {
 }
 
 export interface PulseResult {
-  topics:           PulseItem[];
-  pain_points:      PulseItem[];
-  positives:        PulseItem[];
-  trending:         string;
-  mood_score:       number;
-  mood:             string;
-  minority_insight: PulseItem | null;
+  topics:      PulseItem[];
+  pain_points: PulseItem[];
+  positives:   PulseItem[];
+  trending:    string;
+  mood_score:  number;
+  mood:        string;
   // Set by sentiment.ts after GPT response — maps 1-based message index → content
-  citations?:       Record<number, string>;
+  citations?:  Record<number, string>;
 }
 
 let _client: OpenAI | null = null;
@@ -70,17 +69,11 @@ Analyse the player messages provided and return a JSON object with exactly these
     - "text": string — topic name plus what players were saying, including a prevalence signal, e.g. "Submarine depth charge mechanics (~15 players) — debating whether DDs have enough counter-play tools"
     - "msgs": array of integer message indices (the [N] numbers) that directly support this topic
     - "authors": integer — number of unique authors whose messages support this topic
-- "pain_points": array of 1-4 objects (same shape: "text" + "msgs" + "authors") — specific complaints or frustrations. Group similar phrasings into one item. Include prevalence signal in "text".
-- "positives": array of 1-3 objects (same shape) — things players praised or were excited about. Group similar phrasings. Include prevalence signal in "text".
+- "pain_points": array of up to 6 objects (same shape: "text" + "msgs" + "authors") — specific complaints or frustrations. Group similar phrasings into one item. Include prevalence signal in "text".
+- "positives": array of up to 5 objects (same shape) — things players praised or were excited about. Group similar phrasings. Include prevalence signal in "text".
 - "trending": a single string — the one topic or event that spiked noticeably in the last 24h (or "Nothing unusually trending")
 - "mood_score": an integer from 1 to 5 — overall community mood (1 = very negative/toxic, 3 = neutral/mixed, 5 = very positive/hype)
 - "mood": a single string — one sentence describing the overall community mood and what is driving it
-- "minority_insight": an object OR null — a single high-quality, well-reasoned comment worth surfacing even though it comes from only one author. Must have:
-    - "text": string — brief analytical description of what was said and why it is insightful (do NOT quote verbatim)
-    - "msgs": array containing the single supporting message index
-    - "authors": 1
-  Set "minority_insight" to null if no such standout comment exists.
-
 STRICT EVIDENCE RULES — these are mandatory, not suggestions:
 - ONLY report what is explicitly and directly stated in the messages. Do not infer, extrapolate, or speculate
 - Every item in "topics", "pain_points", and "positives" MUST have at least 2 different message indices in "msgs" AND "authors" ≥ 2. Omit any item that does not meet both thresholds
@@ -271,7 +264,7 @@ export async function analyseCommunityPulse(messages: string[]): Promise<PulseRe
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: `Analyse these ${messages.length} Discord messages:\n\n${messageBlock}` },
       ],
-      max_tokens: 1200,
+      max_tokens: 1600,
       temperature: 0.3,
     });
 
@@ -299,18 +292,9 @@ export async function analyseCommunityPulse(messages: string[]): Promise<PulseRe
     parsed.pain_points = requireEvidence(parsed.pain_points);
     parsed.positives   = requireEvidence(parsed.positives);
 
-    // Validate minority_insight shape if present (1 author is allowed)
-    if (
-      parsed.minority_insight &&
-      (!Array.isArray(parsed.minority_insight.msgs) || parsed.minority_insight.msgs.length === 0)
-    ) {
-      parsed.minority_insight = null;
-    }
-
     logger.info(
       `[openai] Pulse analysis complete. Mood: "${parsed.mood}" | ` +
-      `topics=${parsed.topics.length} pain=${parsed.pain_points.length} positives=${parsed.positives.length}` +
-      (parsed.minority_insight ? ' | minority_insight=1' : ''),
+      `topics=${parsed.topics.length} pain=${parsed.pain_points.length} positives=${parsed.positives.length}`,
     );
     return parsed;
   } catch (error) {
