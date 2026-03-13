@@ -165,7 +165,7 @@ export async function extractKeywordsForSearch(question: string): Promise<string
     const response = await getClient().chat.completions.create({
       model: 'gpt-5.1',
       temperature: 0,
-      max_tokens: 80,
+      max_completion_tokens: 80,
       response_format: { type: 'json_object' },
       messages: [
         {
@@ -232,7 +232,7 @@ export async function answerQuestion(
     const response = await getClient().chat.completions.create({
       model: 'gpt-5.1',
       temperature: 0.4,
-      max_tokens: 800,
+      max_completion_tokens: 800,
       messages: chatMessages,
     });
 
@@ -266,7 +266,7 @@ export async function analyseCommunityPulse(messages: string[]): Promise<PulseRe
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: `Analyse these ${usedMessages} Discord messages:\n\n${messageBlock}` },
       ],
-      max_tokens: 1600,
+      max_completion_tokens: 1600,
       temperature: 0,
     });
 
