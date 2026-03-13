@@ -8,7 +8,7 @@
 import { EmbedBuilder } from 'discord.js';
 import { config } from '../config';
 import { logger } from '../logger';
-import { queryIndexedMessages } from '../store/messageDb';
+import { queryIndexedMessagesWithAuthors } from '../store/messageDb';
 import { getSetting } from '../store/settingsDb';
 import { collectRecentMessages } from '../collectors/messageCollector';
 import { analyseCommunityPulse, PulseItem, PulseResult } from '../api/openai';
@@ -106,13 +106,18 @@ function buildCitations(pulse: PulseResult, messages: string[]): Record<number, 
       if (seenIdx.has(idx)) continue; // skip duplicate indices from GPT
       seenIdx.add(idx);
 
+      if (idx < 1 || idx > messages.length) {
+        logger.warn(`[sentiment] Citation index ${idx} out of bounds (max ${messages.length}) for item: "${item.text.slice(0, 50)}"`);
+        continue;
+      }
+
       const msg = messages[idx - 1]; // msgs are 1-based
       if (!msg) continue;
 
-      // Only keep the citation if the message content shares at least one
-      // significant word with the item. Filters irrelevant GPT hallucinations.
+      // Require at least 2 significant keyword matches to filter GPT hallucinations.
       const msgLower = msg.toLowerCase();
-      if (itemWords.length === 0 || itemWords.some(w => msgLower.includes(w))) {
+      const matchCount = itemWords.filter(w => msgLower.includes(w)).length;
+      if (itemWords.length === 0 || matchCount >= 2) {
         citations[idx] = msg;
       }
     }
@@ -143,25 +148,64 @@ export async function runSentimentReport(source: SentimentSource = 'db'): Promis
 
   logger.info(`[sentiment] Starting Community Pulse report (source: ${source})...`);
 
-  // ── Collect messages ───────────────────────────────────────────────────────
-  const messages = source === 'live'
+  // ── Collect messages (with author IDs) ────────────────────────────────────
+  const rawMessages = source === 'live'
     ? await collectRecentMessages(channelIds)
-    : queryIndexedMessages(24, channelIds, messageLimit, []);
+    : queryIndexedMessagesWithAuthors(24, channelIds, messageLimit);
 
-  if (messages.length < 10) {
-    logger.warn(`[sentiment] Only ${messages.length} messages found — not enough data, skipping`);
+  if (rawMessages.length < 10) {
+    logger.warn(`[sentiment] Only ${rawMessages.length} messages found — not enough data, skipping`);
     return;
   }
 
+  // Build author label map: authorId → "User1", "User2", ...
+  // Sequential labels are privacy-safe and let GPT count unique users accurately.
+  const authorLabelMap = new Map<string, string>();
+  let authorCounter = 0;
+  for (const { authorId } of rawMessages) {
+    if (!authorLabelMap.has(authorId)) {
+      authorCounter++;
+      authorLabelMap.set(authorId, `User${authorCounter}`);
+    }
+  }
+
+  // Format messages as "UserN: content" for GPT
+  const labelledMessages = rawMessages.map(({ authorId, content }) =>
+    `${authorLabelMap.get(authorId)!}: ${content}`,
+  );
+
   // ── Analyse with OpenAI ────────────────────────────────────────────────────
-  const pulse = await analyseCommunityPulse(messages);
+  const pulse = await analyseCommunityPulse(labelledMessages);
   if (!pulse) {
     logger.error('[sentiment] OpenAI analysis failed — Community Pulse report not posted');
     return;
   }
 
+  // ── Verify author counts from cited message indices ────────────────────────
+  // GPT's "authors" field is replaced with a count derived from actual UserN labels
+  // found in the cited messages. This eliminates GPT's tendency to guess wrong counts.
+  for (const item of [...pulse.topics, ...pulse.pain_points, ...pulse.positives]) {
+    const uniqueLabels = new Set<string>();
+    for (const idx of item.msgs) {
+      const msg = labelledMessages[idx - 1];
+      if (!msg) continue;
+      const match = /^(User\d+):/.exec(msg);
+      if (match) uniqueLabels.add(match[1]);
+    }
+    item.authors = uniqueLabels.size;
+  }
+
+  // Filter out items with fewer than 2 verified unique authors
+  pulse.topics      = pulse.topics.filter(item => item.authors >= 2);
+  pulse.pain_points = pulse.pain_points.filter(item => item.authors >= 2);
+  pulse.positives   = pulse.positives.filter(item => item.authors >= 2);
+
+  logger.info(
+    `[sentiment] After author verification: topics=${pulse.topics.length} pain=${pulse.pain_points.length} positives=${pulse.positives.length}`,
+  );
+
   // ── Enrich: citations ──────────────────────────────────────────────────────
-  pulse.citations = buildCitations(pulse, messages);
+  pulse.citations = buildCitations(pulse, labelledMessages);
 
   // ── Enrich: delta (mark recurring pain points) ─────────────────────────────
   // Load last 3 reports (excluding the one we're about to insert)
@@ -176,7 +220,6 @@ export async function runSentimentReport(source: SentimentSource = 'db'): Promis
   const today = formatDate(new Date());
 
   function formatItem(item: PulseItem, showRecurring = false): string {
-    const authorsNote = item.authors > 1 ? ` *(${item.authors} players)*` : '';
     const recurringNote =
       showRecurring && item.recurring
         ? item.first_seen_days_ago && item.first_seen_days_ago > 1
@@ -185,7 +228,7 @@ export async function runSentimentReport(source: SentimentSource = 'db'): Promis
         : showRecurring && !item.recurring
           ? ' 🆕'
           : '';
-    return `• ${item.text}${authorsNote}${recurringNote}`;
+    return `• ${item.text}${recurringNote}`;
   }
 
   const topicsText = pulse.topics.map(t => formatItem(t)).join('\n') || '_Nothing notable_';
@@ -199,7 +242,7 @@ export async function runSentimentReport(source: SentimentSource = 'db'): Promis
   const embed = new EmbedBuilder()
     .setTitle(`💬 Community Pulse — ${today}`)
     .setColor(moodColour)
-    .setDescription(`AI-generated summary of recent player discussion *(${messages.length} messages analysed)*`)
+    .setDescription(`AI-generated summary of recent player discussion *(${labelledMessages.length} messages analysed)*`)
     .addFields(
       {
         name:   '📌 Top Topics',

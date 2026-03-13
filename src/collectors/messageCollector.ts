@@ -24,8 +24,13 @@ const WINDOW_MS  = 24 * 60 * 60 * 1000;  // 24 hours in milliseconds
  * Read up to SAFETY_CAP messages from a single text-based channel or thread,
  * stopping when messages fall outside the 24h window.
  */
-async function readMessagesFrom(channel: TextChannel | AnyThreadChannel, cutoff: number, cap = SAFETY_CAP): Promise<string[]> {
-  const results: string[] = [];
+export interface AuthoredMessage {
+  authorId: string;
+  content:  string;
+}
+
+async function readMessagesFrom(channel: TextChannel | AnyThreadChannel, cutoff: number, cap = SAFETY_CAP): Promise<AuthoredMessage[]> {
+  const results: AuthoredMessage[] = [];
   let lastId: string | undefined;
   let reachedCutoff = false;
 
@@ -42,7 +47,7 @@ async function readMessagesFrom(channel: TextChannel | AnyThreadChannel, cutoff:
         break;
       }
       if (!msg.author.bot && msg.content.length >= 5) {
-        results.push(msg.content.trim());
+        results.push({ authorId: msg.author.id, content: msg.content.trim() });
       }
     }
 
@@ -59,8 +64,8 @@ async function readMessagesFrom(channel: TextChannel | AnyThreadChannel, cutoff:
  * Collect messages from all threads in a forum channel that had activity
  * in the last 24 hours (active threads + recently archived threads).
  */
-async function readForumChannel(forum: any, cutoff: number, perThreadCap = SAFETY_CAP): Promise<string[]> {
-  const results: string[] = [];
+async function readForumChannel(forum: any, cutoff: number, perThreadCap = SAFETY_CAP): Promise<AuthoredMessage[]> {
+  const results: AuthoredMessage[] = [];
 
   // 1. Active threads (all open posts, regardless of age)
   const { threads: activeThreads } = await forum.threads.fetchActive();
@@ -122,10 +127,10 @@ async function readForumChannel(forum: any, cutoff: number, perThreadCap = SAFET
  * channel IDs. Automatically handles both text channels and forum channels.
  * Channels that are inaccessible are silently skipped.
  */
-export async function collectRecentMessages(channelIds: string[]): Promise<string[]> {
+export async function collectRecentMessages(channelIds: string[]): Promise<AuthoredMessage[]> {
   const client = getDiscordClient();
   const cutoff = Date.now() - WINDOW_MS;
-  const all: string[] = [];
+  const all: AuthoredMessage[] = [];
 
   for (const channelId of channelIds) {
     try {
@@ -135,7 +140,7 @@ export async function collectRecentMessages(channelIds: string[]): Promise<strin
         continue;
       }
 
-      let msgs: string[] = [];
+      let msgs: AuthoredMessage[] = [];
 
       if (channel.type === ChannelType.GuildForum) {
         // Forum channel — collect from all threads
@@ -186,13 +191,13 @@ export async function collectMessagesForWindow(
       const channel = await client.channels.fetch(channelId);
       if (!channel) continue;
 
-      let msgs: string[] = [];
+      let msgs: AuthoredMessage[] = [];
       if (channel.type === ChannelType.GuildForum) {
         msgs = await readForumChannel(channel, cutoff, perChannel);
       } else if (channel.isTextBased()) {
         msgs = await readMessagesFrom(channel as TextChannel, cutoff, perChannel);
       }
-      all.push(...msgs);
+      all.push(...msgs.map(m => m.content));
     } catch (err) {
       logger.warn(`[messageCollector] Chat collect failed for ${channelId}:`, err);
     }

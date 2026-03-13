@@ -64,11 +64,13 @@ function formatOpenAiError(error: unknown): string {
 const SYSTEM_PROMPT = `You are a community analyst for a World of Warships gaming Discord server.
 World of Warships is a naval combat MMO. Common topics include: specific ships (e.g. Kremlin, Yamato, Smaland), ship classes (destroyers/DDs, cruisers/CAs, battleships/BBs, carriers/CVs, submarines/SSs), game modes (Ranked, Clan Battles, Operations, Co-op, Random), mechanics (spotting, concealment, flooding, fire, torpedoes, CV rework, economy, credits, dockyard), balance/meta shifts, recent patches or updates, and community events.
 
+Each message is prefixed with a label like "User1:", "User2:", etc. These labels identify unique players — count distinct labels to measure how many players discussed a topic.
+
 Analyse the player messages provided and return a JSON object with exactly these fields:
 - "topics": array of up to 5 objects — the most discussed topics. Group similar phrasings into a single coherent topic (e.g. "is too fast" + "speed is broken" → one topic about mobility). Each object has:
     - "text": string — topic name plus what players were saying, including a prevalence signal, e.g. "Submarine depth charge mechanics (~15 players) — debating whether DDs have enough counter-play tools"
     - "msgs": array of integer message indices (the [N] numbers) that directly support this topic
-    - "authors": integer — number of unique authors whose messages support this topic
+    - "authors": integer — count of distinct UserN labels present in the cited msgs
 - "pain_points": array of up to 6 objects (same shape: "text" + "msgs" + "authors") — specific complaints or frustrations. Group similar phrasings into one item. Include prevalence signal in "text".
 - "positives": array of up to 5 objects (same shape) — things players praised or were excited about. Group similar phrasings. Include prevalence signal in "text".
 - "trending": a single string — the one topic or event that spiked noticeably in the last 24h (or "Nothing unusually trending")
@@ -258,18 +260,20 @@ export async function analyseCommunityPulse(messages: string[]): Promise<PulseRe
 
   try {
     const response = await getClient().chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4o',
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: `Analyse these ${messages.length} Discord messages:\n\n${messageBlock}` },
       ],
       max_tokens: 1600,
-      temperature: 0.3,
+      temperature: 0,
     });
 
     const raw = response.choices[0]?.message?.content;
     if (!raw) throw new Error('Empty response from OpenAI');
+
+    logger.info(`[openai] Pulse raw response: ${raw}`);
 
     const parsed = JSON.parse(raw) as PulseResult;
 
@@ -277,15 +281,12 @@ export async function analyseCommunityPulse(messages: string[]): Promise<PulseRe
       throw new Error('Unexpected JSON shape from OpenAI');
     }
 
-    // Drop any item that doesn't have ≥2 supporting messages from ≥2 unique authors.
-    // This is our primary anti-hallucination guard.
+    // Require ≥2 supporting messages per item.
+    // Author count verification (≥2 unique authors) is done in sentiment.ts
+    // using the actual UserN labels in cited messages — more accurate than GPT's guess.
     const requireEvidence = (items: PulseItem[]): PulseItem[] =>
       (items ?? []).filter(
-        item =>
-          Array.isArray(item.msgs) &&
-          item.msgs.length >= 2 &&
-          typeof item.authors === 'number' &&
-          item.authors >= 2,
+        item => Array.isArray(item.msgs) && item.msgs.length >= 2,
       );
 
     parsed.topics      = requireEvidence(parsed.topics);

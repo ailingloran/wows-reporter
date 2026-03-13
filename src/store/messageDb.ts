@@ -249,6 +249,35 @@ export function searchMessagesFts(
 }
 
 /**
+ * Query messages for sentiment analysis with author IDs.
+ * Returns the most recent messages first (recency-weighted) with author info.
+ * Used by the Community Pulse report to build author label maps.
+ */
+export function queryIndexedMessagesWithAuthors(
+  windowHours: number,
+  channelIds:  string[],
+  limit:       number,
+): { authorId: string; content: string }[] {
+  if (channelIds.length === 0) return [];
+
+  const cutoff = windowHours ? Date.now() - windowHours * 3_600_000 : 0;
+  const chPh   = channelIds.map(() => '?').join(', ');
+  const timeFilter = cutoff ? 'AND created_at >= ?' : '';
+  const baseParams = cutoff ? [...channelIds, cutoff] : [...channelIds];
+
+  return (
+    db()
+      .prepare(
+        `SELECT author_id, content FROM discord_messages
+         WHERE channel_id IN (${chPh}) ${timeFilter}
+         ORDER BY created_at DESC
+         LIMIT ?`,
+      )
+      .all(...baseParams, limit) as { author_id: string; content: string }[]
+  ).map(r => ({ authorId: r.author_id, content: r.content }));
+}
+
+/**
  * Query messages for a chat job (legacy LIKE-based approach, kept for sentiment reports).
  *
  * Strategy:
