@@ -1,6 +1,6 @@
 /**
  * OpenAI API wrapper for Community Pulse sentiment analysis.
- * Uses gpt-4o-mini with JSON mode for structured, reliable output.
+ * Uses gpt-5.1 with JSON mode for structured, reliable output.
  */
 
 import OpenAI from 'openai';
@@ -163,7 +163,7 @@ export async function extractKeywordsForSearch(question: string): Promise<string
 
   try {
     const response = await getClient().chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5.1',
       temperature: 0,
       max_tokens: 80,
       response_format: { type: 'json_object' },
@@ -230,7 +230,7 @@ export async function answerQuestion(
 
   try {
     const response = await getClient().chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-5.1',
       temperature: 0.4,
       max_tokens: 800,
       messages: chatMessages,
@@ -254,29 +254,13 @@ export async function analyseCommunityPulse(messages: string[]): Promise<PulseRe
     return null;
   }
 
-  // gpt-4o on Tier 1 has a 30k TPM limit. Budget ~24k tokens for the message
-  // block (leaving room for the system prompt + output). At ~4 chars/token that
-  // is ~96k chars — but we use 80k to stay safe and absorb message overhead.
-  const MAX_BLOCK_CHARS = 80_000;
   const numberedMessages = messages.map((m, i) => `[${i + 1}] ${m}`);
-  let messageBlock = numberedMessages.join('\n');
-  let usedMessages = messages.length;
-  if (messageBlock.length > MAX_BLOCK_CHARS) {
-    // Drop from the end (oldest messages, since input is recency-sorted)
-    let total = 0;
-    let cutAt = 0;
-    for (let i = 0; i < numberedMessages.length; i++) {
-      total += numberedMessages[i].length + 1; // +1 for newline
-      if (total > MAX_BLOCK_CHARS) { cutAt = i; break; }
-    }
-    usedMessages = cutAt || numberedMessages.length;
-    messageBlock = numberedMessages.slice(0, usedMessages).join('\n');
-    logger.info(`[openai] Message block truncated to ${usedMessages}/${messages.length} messages to stay within TPM limit`);
-  }
+  const messageBlock = numberedMessages.join('\n');
+  const usedMessages = messages.length;
 
   try {
     const response = await getClient().chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-5.1',
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
