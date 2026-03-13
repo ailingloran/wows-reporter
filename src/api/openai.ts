@@ -164,7 +164,6 @@ export async function extractKeywordsForSearch(question: string): Promise<string
   try {
     const response = await getClient().chat.completions.create({
       model: 'gpt-5.1',
-      temperature: 0,
       max_completion_tokens: 80,
       response_format: { type: 'json_object' },
       messages: [
@@ -231,7 +230,6 @@ export async function answerQuestion(
   try {
     const response = await getClient().chat.completions.create({
       model: 'gpt-5.1',
-      temperature: 0.4,
       max_completion_tokens: 800,
       messages: chatMessages,
     });
@@ -267,9 +265,9 @@ export async function analyseCommunityPulse(messages: string[]): Promise<PulseRe
         { role: 'user', content: `Analyse these ${usedMessages} Discord messages:\n\n${messageBlock}` },
       ],
       max_completion_tokens: 1600,
-      temperature: 0,
     });
 
+    logger.info(`[openai] Pulse finish_reason: ${response.choices[0]?.finish_reason}, content length: ${response.choices[0]?.message?.content?.length ?? 0}`);
     const raw = response.choices[0]?.message?.content;
     if (!raw) throw new Error('Empty response from OpenAI');
 
