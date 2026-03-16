@@ -60,6 +60,67 @@ CREATE TABLE IF NOT EXISTS chat_jobs (
   error         TEXT
 );
 
+-- ── Staff Activity Tracking ───────────────────────────────────────────────────
+
+-- Staff group definitions (CMs, Moderators, Helpers)
+CREATE TABLE IF NOT EXISTS staff_groups (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT    NOT NULL UNIQUE,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
+-- Role IDs assigned to each staff group
+CREATE TABLE IF NOT EXISTS staff_tracked_roles (
+  group_id INTEGER NOT NULL REFERENCES staff_groups(id) ON DELETE CASCADE,
+  role_id  TEXT    NOT NULL,
+  PRIMARY KEY (group_id, role_id)
+);
+
+-- Explicit user IDs assigned to each staff group
+CREATE TABLE IF NOT EXISTS staff_tracked_users (
+  group_id INTEGER NOT NULL REFERENCES staff_groups(id) ON DELETE CASCADE,
+  user_id  TEXT    NOT NULL,
+  PRIMARY KEY (group_id, user_id)
+);
+
+-- Per-message activity log (full server coverage, no channel/length filters)
+CREATE TABLE IF NOT EXISTS staff_message_events (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id      TEXT    NOT NULL,
+  display_name TEXT    NOT NULL,
+  group_id     INTEGER NOT NULL,
+  channel_id   TEXT    NOT NULL,  -- root channel (parent ID for threads)
+  channel_name TEXT    NOT NULL,
+  is_thread    INTEGER NOT NULL DEFAULT 0,
+  thread_id    TEXT,              -- thread channel ID when is_thread = 1
+  message_id   TEXT    NOT NULL UNIQUE,
+  created_at   INTEGER NOT NULL  -- Unix ms timestamp
+);
+
+-- Weekly aggregated snapshots
+CREATE TABLE IF NOT EXISTS staff_weekly_snapshots (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  week_start    INTEGER NOT NULL,  -- Unix ms of Monday 00:00 UTC
+  user_id       TEXT    NOT NULL,
+  display_name  TEXT    NOT NULL,
+  group_id      INTEGER NOT NULL,
+  message_count INTEGER NOT NULL DEFAULT 0,
+  channel_count INTEGER NOT NULL DEFAULT 0,
+  thread_count  INTEGER NOT NULL DEFAULT 0,
+  last_activity INTEGER,
+  top_channel   TEXT,
+  UNIQUE(week_start, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_msg_user_time
+  ON staff_message_events(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_staff_msg_time
+  ON staff_message_events(created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_staff_weekly_week
+  ON staff_weekly_snapshots(week_start DESC);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_snapshots_period_taken
   ON snapshots(period, taken_at DESC);

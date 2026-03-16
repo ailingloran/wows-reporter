@@ -22,6 +22,14 @@ import { countIndexedMessages, getFtsHealth, rebuildFts } from '../store/message
 import { getAllSettings, setSetting } from '../store/settingsDb';
 import { rescheduleReport } from '../scheduler';
 import { createChatJob, getChatHistoryPage, getChatJobResponse, removeChatJob } from './chatJobs';
+import {
+  addRoleToGroup, addUserToGroup,
+  getStaffActivity, getStaffGroupConfig,
+  getWeeklySnapshots,
+  removeRoleFromGroup, removeUserFromGroup,
+  takeWeeklySnapshot,
+} from '../store/staffDb';
+import { invalidateStaffCache } from '../staffTracker';
 
 const app = express();
 app.use(express.json());
@@ -366,6 +374,97 @@ app.post('/api/backfill', (req: Request, res: Response) => {
     backfillMessages(hours).catch((err: unknown) => logger.error('[dashboard] Backfill failed:', err));
     res.json({ ok: true, message: `Backfill started for last ${hours}h` });
   }).catch(() => res.status(500).json({ error: 'Failed to load indexer module' }));
+});
+
+// ── Staff activity tracking ───────────────────────────────────────────────────
+
+app.get('/api/staff/config', (_req: Request, res: Response) => {
+  try {
+    res.json(getStaffGroupConfig());
+  } catch (error) {
+    logger.error('[dashboard] /api/staff/config error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/staff/activity', (req: Request, res: Response) => {
+  try {
+    const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 30);
+    res.json(getStaffActivity(days));
+  } catch (error) {
+    logger.error('[dashboard] /api/staff/activity error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/staff/snapshots', (req: Request, res: Response) => {
+  try {
+    const weeks = Math.min(Math.max(Number(req.query.weeks) || 12, 1), 52);
+    res.json(getWeeklySnapshots(weeks));
+  } catch (error) {
+    logger.error('[dashboard] /api/staff/snapshots error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/staff/snapshots/take', (_req: Request, res: Response) => {
+  try {
+    takeWeeklySnapshot();
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('[dashboard] /api/staff/snapshots/take error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/staff/groups/:groupId/roles', (req: Request, res: Response) => {
+  try {
+    const groupId = parseInt(req.params.groupId, 10);
+    const { roleId } = req.body as { roleId: string };
+    if (!roleId?.trim()) { res.status(400).json({ error: 'roleId required' }); return; }
+    addRoleToGroup(groupId, roleId.trim());
+    invalidateStaffCache();
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('[dashboard] POST /api/staff/groups/:id/roles error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/staff/groups/:groupId/roles/:roleId', (req: Request, res: Response) => {
+  try {
+    removeRoleFromGroup(parseInt(req.params.groupId, 10), req.params.roleId);
+    invalidateStaffCache();
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('[dashboard] DELETE /api/staff/groups/:id/roles/:roleId error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/staff/groups/:groupId/users', (req: Request, res: Response) => {
+  try {
+    const groupId = parseInt(req.params.groupId, 10);
+    const { userId } = req.body as { userId: string };
+    if (!userId?.trim()) { res.status(400).json({ error: 'userId required' }); return; }
+    addUserToGroup(groupId, userId.trim());
+    invalidateStaffCache();
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('[dashboard] POST /api/staff/groups/:id/users error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/staff/groups/:groupId/users/:userId', (req: Request, res: Response) => {
+  try {
+    removeUserFromGroup(parseInt(req.params.groupId, 10), req.params.userId);
+    invalidateStaffCache();
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('[dashboard] DELETE /api/staff/groups/:id/users/:userId error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 export function startDashboard(): void {

@@ -16,9 +16,10 @@ const TZ = 'Europe/Berlin';
 
 // ── Task references (kept so they can be stopped on reschedule) ───────────────
 
-let dailyTask:     cron.ScheduledTask | null = null;
-let monthlyTask:   cron.ScheduledTask | null = null;
-let sentimentTask: cron.ScheduledTask | null = null;
+let dailyTask:        cron.ScheduledTask | null = null;
+let monthlyTask:      cron.ScheduledTask | null = null;
+let sentimentTask:    cron.ScheduledTask | null = null;
+let staffSnapshotTask: cron.ScheduledTask | null = null;
 
 // ── Callbacks (named so they can be reused when rescheduling) ─────────────────
 
@@ -73,6 +74,17 @@ async function sentimentCallback() {
   }
 }
 
+async function staffSnapshotCallback() {
+  logger.info('[scheduler] Staff weekly snapshot triggered');
+  try {
+    const { takeWeeklySnapshot } = await import('./store/staffDb');
+    takeWeeklySnapshot();
+    logger.info('[scheduler] Staff weekly snapshot complete');
+  } catch (err) {
+    logger.error('[scheduler] Staff weekly snapshot failed:', err);
+  }
+}
+
 // ── Registration ──────────────────────────────────────────────────────────────
 
 export function registerSchedules(): void {
@@ -80,9 +92,10 @@ export function registerSchedules(): void {
   const mh = parseInt(getSetting('monthly_hour',   '0'),  10);
   const sh = parseInt(getSetting('sentiment_hour', '17'), 10);
 
-  dailyTask     = cron.schedule(`0 ${dh} * * *`,   dailyCallback,     { timezone: TZ });
-  monthlyTask   = cron.schedule(`0 ${mh} 1 * *`,   monthlyCallback,   { timezone: TZ });
-  sentimentTask = cron.schedule(`0 ${sh} * * *`,   sentimentCallback, { timezone: TZ });
+  dailyTask        = cron.schedule(`0 ${dh} * * *`,   dailyCallback,        { timezone: TZ });
+  monthlyTask      = cron.schedule(`0 ${mh} 1 * *`,   monthlyCallback,      { timezone: TZ });
+  sentimentTask    = cron.schedule(`0 ${sh} * * *`,   sentimentCallback,    { timezone: TZ });
+  staffSnapshotTask = cron.schedule(`0 0 * * 1`,       staffSnapshotCallback, { timezone: TZ });
 
   logger.info(
     `[scheduler] Daily at ${dh}:00, Monthly at ${mh}:00 on 1st, ` +

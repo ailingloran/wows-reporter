@@ -7,12 +7,14 @@ import 'dotenv/config';
 import { initDb } from './store/db';
 import { initMessageDb } from './store/messageDb';
 import { initSettings } from './store/settingsDb';
+import { initStaffGroups } from './store/staffDb';
 import { initDiscordClient, getDiscordClient } from './api/discord';
 import { registerSchedules } from './scheduler';
 import { runDailyReport } from './reports/daily';
 import { runMonthlyReport } from './reports/monthly';
 import { startDashboard } from './dashboard/server';
 import { startMessageIndexer, backfillMessages } from './indexer/messageIndexer';
+import { startStaffTracker } from './staffTracker';
 import { config } from './config';
 import { logger } from './logger';
 
@@ -23,6 +25,7 @@ async function main() {
   initDb();
   initMessageDb();
   initSettings();
+  initStaffGroups();
   logger.info('Databases initialised');
 
   // 2. Connect Discord bot
@@ -87,6 +90,9 @@ async function main() {
 
   // 5. Start real-time message indexer
   startMessageIndexer();
+
+  // 6. Start staff activity tracker (full-server coverage)
+  startStaffTracker();
 
   logger.info('=== WoWS Reporter running. Waiting for scheduled events. ===');
 }
