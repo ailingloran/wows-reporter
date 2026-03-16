@@ -121,6 +121,15 @@ CREATE INDEX IF NOT EXISTS idx_staff_msg_time
 CREATE INDEX IF NOT EXISTS idx_staff_weekly_week
   ON staff_weekly_snapshots(week_start DESC);
 
+-- Named access tokens for shared dashboard access (guest read-only sessions)
+CREATE TABLE IF NOT EXISTS access_tokens (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  label      TEXT    NOT NULL,
+  token      TEXT    NOT NULL UNIQUE,
+  created_at TEXT    NOT NULL,
+  expires_at TEXT    -- NULL = never expires
+);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_snapshots_period_taken
   ON snapshots(period, taken_at DESC);

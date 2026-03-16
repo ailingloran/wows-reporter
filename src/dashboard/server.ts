@@ -30,6 +30,7 @@ import {
   takeWeeklySnapshot,
 } from '../store/staffDb';
 import { invalidateStaffCache } from '../staffTracker';
+import { createToken, listTokens, revokeToken, verifyToken } from '../store/tokenDb';
 
 const app = express();
 app.use(express.json());
@@ -465,6 +466,56 @@ app.delete('/api/staff/groups/:groupId/users/:userId', (req: Request, res: Respo
     logger.error('[dashboard] DELETE /api/staff/groups/:id/users/:userId error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
+});
+
+// ── Access tokens ─────────────────────────────────────────────────────────────
+
+app.get('/api/tokens', (_req: Request, res: Response) => {
+  try {
+    res.json(listTokens());
+  } catch (error) {
+    logger.error('[dashboard] GET /api/tokens error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/tokens', (req: Request, res: Response) => {
+  try {
+    const { label, expiresAt } = req.body as { label?: string; expiresAt?: string };
+    if (!label?.trim()) {
+      res.status(400).json({ error: 'label is required' });
+      return;
+    }
+    const token = createToken(label.trim(), expiresAt);
+    res.json(token); // includes the plain-text token — shown once
+  } catch (error) {
+    logger.error('[dashboard] POST /api/tokens error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/tokens/:id', (req: Request, res: Response) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const ok = revokeToken(id);
+    res.json({ ok });
+  } catch (error) {
+    logger.error('[dashboard] DELETE /api/tokens/:id error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Unauthenticated verify endpoint — used by the frontend login flow
+app.post('/api/tokens/verify', (req: Request, res: Response) => {
+  const auth = req.headers.authorization ?? '';
+  // Allow this endpoint with just the dashboard secret (from frontend server-side)
+  // or skip auth check — it only returns true/false, no sensitive data
+  const { token } = req.body as { token?: string };
+  if (!token) {
+    res.status(400).json({ error: 'token is required' });
+    return;
+  }
+  res.json({ valid: verifyToken(token) });
 });
 
 export function startDashboard(): void {
