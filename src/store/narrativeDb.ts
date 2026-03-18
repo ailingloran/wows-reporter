@@ -34,12 +34,19 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
       'hydro', 'sonar', 'smoke', 'detect',
     ],
   },
-  carriers_subs: {
-    label: 'Carriers & Subs',
+  carriers: {
+    label: 'Carriers',
     keywords: [
-      'carrier', 'submarine', ' sub ', 'depth charge', 'torpedo soup', 'aerial',
-      'airstrike', 'rocket plane', 'attack aircraft', 'spotting plane',
-      ' cv ', ' cvs ', ' subs ', 'torps', 'torpedo', 'torpedoes',
+      'carrier', 'aerial', 'airstrike', 'rocket plane', 'attack aircraft',
+      'spotting plane', ' cv ', ' cvs ', 'carrier strike',
+    ],
+  },
+  submarines: {
+    label: 'Submarines',
+    keywords: [
+      'submarine', ' sub ', ' subs ', 'depth charge', 'torpedo soup',
+      'ping', 'pinging', 'homing torpedo', 'acoustic', 'submerged',
+      'torps', 'torpedo', 'torpedoes',
     ],
   },
   new_content: {
