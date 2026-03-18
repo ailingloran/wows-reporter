@@ -174,6 +174,18 @@ const STOPWORDS = new Set([
   'dont', 'doesnt', 'didnt', 'cant', 'wont', 'isnt', 'wasnt', 'arent',
   'havent', 'hadnt', 'hasnt', 'also', 'yeah', 'yep', 'nope', 'okay',
   'think', 'think', 'maybe', 'whatever', 'whenever', 'however',
+  // Generic adverbs / sentiment words that add no signal
+  'currently', 'usually', 'mainly', 'following', 'changing', 'older',
+  'awful', 'chance', 'hours', 'impact', 'express',
+  // Slang / Discord filler
+  'dunno', 'shrugeg', 'shrug',
+  // URL fragments
+  'https', 'http', 'discord', 'reddit', 'imgur',
+  // Contraction fragments (apostrophe stripped)
+  'doesn', 'haven', 'wasn', 'aren', 'hadn', 'hasn',
+  // Other generics caught in review
+  'everything', 'nothing', 'something', 'anything',
+  'shoots', 'builds', 'stats', 'chance', 'reload',
 ]);
 
 // Pre-computed list of single-word category keywords for fast substring matching
