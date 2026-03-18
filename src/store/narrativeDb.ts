@@ -585,7 +585,8 @@ export function reprocessNarrativeHistory(): { processed: number; errors: number
       categorizeAndStorePulseReport(pulse, report.taken_at.slice(0, 10));
       processed++;
     } catch (err) {
-      logger.warn(`[narrative] Failed to reprocess ${report.taken_at}:`, err);
+      const msg = err instanceof Error ? `${err.message} | ${err.stack?.split('\n')[1]?.trim()}` : String(err);
+      logger.warn(`[narrative] Failed to reprocess ${report.taken_at}: ${msg}`);
       errors++;
     }
   }
