@@ -26,7 +26,9 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
     keywords: [
       'overpowered', ' op ', 'broken', 'nerf', 'buff', 'meta', 'he spam', 'fire chance',
       'flooding', 'matchmaking', 'uptiered', 'tier spread', 'unbalanced', 'overtuned',
-      'balance', 'powercreep', 'power creep',
+      'balance', 'powercreep', 'power creep', 'tiers', ' tier ', 'secondary',
+      'secondaries', 'cruiser', 'destroyer', 'battleship', 'armor', 'armour',
+      'concealment', 'dispersion', 'accuracy', 'sigma', 'overmatch', 'ricochet',
     ],
   },
   carriers_subs: {
@@ -86,12 +88,54 @@ const ALL_CATEGORY_KEYWORDS = new Set<string>(
 // ── Text helpers ───────────────────────────────────────────────────────────────
 
 const STOPWORDS = new Set([
+  // Articles / conjunctions / prepositions
   'the', 'and', 'for', 'that', 'this', 'with', 'have', 'from', 'they',
   'their', 'about', 'more', 'some', 'most', 'many', 'very', 'when',
   'which', 'were', 'been', 'are', 'was', 'not', 'but', 'its', 'our',
   'all', 'can', 'will', 'just', 'also', 'even', 'still', 'than', 'then',
-  'into', 'over', 'each', 'only', 'like', 'game', 'player', 'players',
-  'ship', 'ships', 'discussing', 'discussion', 'community', 'server', 'user',
+  'into', 'over', 'each', 'only', 'like', 'while', 'since', 'until',
+  'after', 'before', 'above', 'below', 'between', 'through', 'during',
+  'because', 'though', 'although', 'unless', 'whether', 'either',
+  // Common verbs
+  'play', 'plays', 'played', 'playing',
+  'think', 'thinks', 'thought', 'thinking',
+  'know', 'knows', 'known', 'knowing',
+  'make', 'makes', 'made', 'making',
+  'take', 'takes', 'taken', 'taking',
+  'come', 'comes', 'came', 'coming',
+  'seem', 'seems', 'seemed', 'feeling',
+  'look', 'looks', 'looked', 'looking',
+  'want', 'wants', 'wanted', 'wanting',
+  'need', 'needs', 'needed', 'needing',
+  'give', 'gives', 'given', 'giving',
+  'find', 'finds', 'found', 'finding',
+  'keep', 'keeps', 'kept', 'keeping',
+  'show', 'shows', 'shown', 'showing',
+  'mean', 'means', 'meant', 'meaning',
+  'work', 'works', 'worked', 'working',
+  'miss', 'using', 'doing', 'going', 'being', 'having', 'getting',
+  'saying', 'seeing', 'trying', 'putting', 'turning', 'asking',
+  // Common adjectives / adverbs
+  'good', 'great', 'best', 'better', 'worse', 'worst', 'right', 'wrong',
+  'real', 'really', 'quite', 'pretty', 'fairly', 'truly', 'simply',
+  'often', 'never', 'always', 'again', 'maybe', 'might', 'could',
+  'would', 'should', 'shall', 'other', 'every', 'first', 'second',
+  'third', 'today', 'times', 'later', 'early', 'small', 'large',
+  'much', 'less', 'least', 'well', 'back', 'away', 'down', 'long',
+  'high', 'left', 'last', 'next', 'same', 'else', 'such',
+  // Common nouns (too generic)
+  'game', 'games', 'player', 'players', 'ship', 'ships', 'team', 'teams',
+  'time', 'times', 'line', 'lines', 'mode', 'modes', 'thing', 'things',
+  'issue', 'issues', 'change', 'changes', 'point', 'points', 'level',
+  'type', 'types', 'part', 'parts', 'place', 'case', 'fact', 'kind',
+  'main', 'range', 'event', 'people', 'person', 'someone', 'everyone',
+  'anyone', 'nothing', 'something', 'anything', 'where', 'there', 'here',
+  // WoWs generic (too broad to be meaningful as emerging signals)
+  'discussing', 'discussion', 'community', 'server', 'user', 'users',
+  'battle', 'battles', 'match', 'matches', 'round', 'rounds', 'average',
+  // Fragments & filler
+  'dont', 'doesnt', 'didnt', 'cant', 'wont', 'isnt', 'wasnt', 'arent',
+  'havent', 'hadnt', 'hasnt', 'also', 'yeah', 'yep', 'nope', 'okay',
 ]);
 
 function extractWords(text: string): string[] {
@@ -99,7 +143,12 @@ function extractWords(text: string): string[] {
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter(w => w.length >= 4 && !STOPWORDS.has(w));
+    .filter(w =>
+      w.length >= 5 &&                 // min 5 chars filters most common short words
+      !STOPWORDS.has(w) &&
+      !/^user\d+$/.test(w) &&          // filter UserN labels (User1, User73, etc.)
+      !/^\d+$/.test(w),                // filter pure numbers
+    );
 }
 
 function matchCategories(text: string): string[] {
@@ -311,7 +360,10 @@ export function getNarrativeDrift(): DriftResponse {
         ? (curr.total_items - prior.total_items) / prior.total_items
         : 0;
 
-      if (sentDrop <= -0.2) {
+      // Require both periods to have real data before alerting
+      const bothHaveData = curr.total_items >= 5 && prior.total_items >= 5;
+
+      if (sentDrop <= -0.2 && bothHaveData) {
         alerts.push({
           level: 'danger',
           category: curr.category,
@@ -321,7 +373,8 @@ export function getNarrativeDrift(): DriftResponse {
           priorSentiment:   Math.round(prior.avg_sentiment * 100) / 100,
           volumeChange: Math.round(volChange * 100) / 100,
         });
-      } else if (volChange >= 0.3 && curr.total_items >= 3) {
+      } else if (volChange >= 0.5 && bothHaveData) {
+        // Volume threshold 50% (not 30%) and both periods need ≥5 items
         alerts.push({
           level: 'warning',
           category: curr.category,
@@ -339,7 +392,7 @@ export function getNarrativeDrift(): DriftResponse {
   type KwRow = { keyword: string; total: number };
   const emergingKw = db.prepare(`
     SELECT keyword, SUM(count) as total FROM narrative_keywords
-    WHERE date > ? GROUP BY keyword HAVING total >= 5 ORDER BY total DESC LIMIT 15
+    WHERE date > ? GROUP BY keyword HAVING total >= 10 ORDER BY total DESC LIMIT 10
   `).all(day7) as KwRow[];
 
   const priorKw = db.prepare(`
@@ -350,7 +403,8 @@ export function getNarrativeDrift(): DriftResponse {
 
   for (const kw of emergingKw) {
     const priorCount = priorKwMap.get(kw.keyword) ?? 0;
-    if (kw.total > priorCount * 2) {
+    // Only alert if keyword is genuinely new or significantly spiked vs prior period
+    if (kw.total >= 10 && kw.total > priorCount * 3) {
       alerts.push({
         level: 'emerging',
         category: 'emerging',
