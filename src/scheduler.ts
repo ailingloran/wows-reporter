@@ -20,6 +20,7 @@ let dailyTask:        cron.ScheduledTask | null = null;
 let monthlyTask:      cron.ScheduledTask | null = null;
 let sentimentTask:    cron.ScheduledTask | null = null;
 let staffSnapshotTask: cron.ScheduledTask | null = null;
+let narrativeTask:    cron.ScheduledTask | null = null;
 
 // ── Callbacks (named so they can be reused when rescheduling) ─────────────────
 
@@ -74,6 +75,17 @@ async function sentimentCallback() {
   }
 }
 
+async function narrativeCallback() {
+  logger.info('[scheduler] Narrative drift daily processing triggered');
+  try {
+    const { processYesterdayFromMessages } = await import('./store/narrativeDb');
+    processYesterdayFromMessages();
+    logger.info('[scheduler] Narrative drift processing complete');
+  } catch (err) {
+    logger.error('[scheduler] Narrative drift processing failed:', err);
+  }
+}
+
 async function staffSnapshotCallback() {
   logger.info('[scheduler] Staff weekly snapshot triggered');
   try {
@@ -96,6 +108,8 @@ export function registerSchedules(): void {
   monthlyTask      = cron.schedule(`0 ${mh} 1 * *`,   monthlyCallback,      { timezone: TZ });
   sentimentTask    = cron.schedule(`0 ${sh} * * *`,   sentimentCallback,    { timezone: TZ });
   staffSnapshotTask = cron.schedule(`0 0 * * 1`,       staffSnapshotCallback, { timezone: TZ });
+  // Narrative drift runs at 01:00 CET daily — independent of Community Pulse
+  narrativeTask    = cron.schedule(`0 1 * * *`,        narrativeCallback,    { timezone: TZ });
 
   logger.info(
     `[scheduler] Daily at ${dh}:00, Monthly at ${mh}:00 on 1st, ` +

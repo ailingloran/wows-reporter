@@ -1,13 +1,17 @@
 /**
  * Narrative Drift Tracker
  *
- * After each Community Pulse report, classify each topic/pain_point/positive item
- * into WoWs topic categories using keyword matching. Aggregate daily per-category
- * sentiment scores and detect week-over-week drift.
+ * Processes raw Discord messages (from the message index DB) into per-category
+ * daily sentiment scores using keyword matching and a simple positive/negative
+ * word lexicon. Runs independently of the Community Pulse — no GPT cost.
+ *
+ * Sentiment formula per category per day:
+ *   (pain_msgs × 1.5 + neutral_msgs × 3.0 + positive_msgs × 4.5) / total → 1–5 scale
  */
 
+import Database from 'better-sqlite3';
 import { getDb } from './db';
-import { PulseResult, PulseItem } from '../api/openai';
+import { config } from '../config';
 import { logger } from '../logger';
 
 // ── WoWs topic taxonomy ────────────────────────────────────────────────────────
@@ -17,36 +21,36 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
     label: 'Economy & Grind',
     keywords: [
       'credit', 'doubloon', 'free xp', 'coal', 'steel', 'grind', 'pay to win', 'p2w',
-      'premium', 'expensiv', 'crate', 'container', 'research bureau', 'dockyard',
-      'cost', 'price', 'loot box', 'earnable', 'resource', 'earn', 'reward',
+      'premium', 'crate', 'container', 'research bureau', 'dockyard',
+      'cost', 'price', 'loot box', 'resource', 'earn', 'reward',
       'silver', 'snowflake', 'directive', 'campaign', 'combat mission',
+      'bundle', 'token', 'trade-in', 'admiral bundle', 'supercontainer',
     ],
   },
   balance: {
-    label: 'Balance & Meta',
+    label: 'Balance',
     keywords: [
       'overpowered', ' op ', 'broken', 'nerf', 'buff', 'meta', 'he spam', 'fire chance',
-      'flooding', 'unbalanced', 'overtuned',
-      'balance', 'powercreep', 'power creep', ' tier ', 'secondary',
-      'secondaries', 'cruiser', 'cruisers', 'destroyer', 'destroyers',
-      'battleship', 'battleships', 'armor', 'armour', 'radar',
-      'concealment', 'dispersion', 'accuracy', 'sigma', 'overmatch', 'ricochet',
-      'hydro', 'smoke', 'detect',
+      'flooding', 'unbalanced', 'overtuned', 'balance', 'powercreep', 'power creep',
+      'cruiser', 'cruisers', 'destroyer', 'destroyers', 'battleship', 'battleships',
+      'armor', 'armour', 'concealment', 'dispersion', 'accuracy', 'sigma',
+      'overmatch', 'ricochet', 'smoke', 'secondaries', 'secondary',
     ],
   },
   matchmaking: {
     label: 'Matchmaking',
     keywords: [
-      'matchmaking', 'matchmaker', 'uptiered', 'tier spread', 'mm ', ' sbmm',
+      'matchmaking', 'matchmaker', 'uptiered', 'tier spread', ' mm ', 'sbmm',
       'queue time', 'team balance', 'divisions', 'one-sided', 'uneven teams',
-      'seal clubbing', 'bottom tier', 'top tier', 'spread',
+      'seal clubbing', 'bottom tier', 'top tier', 'decompression', 'uptier',
     ],
   },
   carriers: {
     label: 'Carriers',
     keywords: [
       'carrier', 'aerial', 'airstrike', 'rocket plane', 'attack aircraft',
-      'spotting plane', ' cv ', ' cvs ', 'carrier strike',
+      'spotting plane', ' cv ', ' cvs ', 'aviation',
+      'aircraft', 'bomber', 'torpedo bomber', 'fighter plane',
     ],
   },
   submarines: {
@@ -62,8 +66,8 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
     label: 'New Ships & Content',
     keywords: [
       'tech tree', 'premium ship', 'early access', 'paper ship', 'coal ship',
-      'steel ship', 'super ship', 'new ship', 'dockyard', 'announced', 'coming soon',
-      'update ', 'patch ', 'new release', 'test ship',
+      'steel ship', 'super ship', 'new ship', 'announced', 'coming soon',
+      'update ', 'patch ', 'new release', 'test ship', 'new line', 'rework',
     ],
   },
   performance: {
@@ -79,7 +83,7 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
     keywords: [
       'no communication', 'wargaming', ' wg ', 'ignor', 'tone deaf', 'transparency',
       'roadmap', 'abandon', 'lied', 'promis', 'listen to player', 'player feedback',
-      'community feedback', 'no response', 'silence', 'mislead',
+      'community feedback', 'no response', 'silence', 'mislead', 'dev blog', 'devs',
     ],
   },
   game_modes: {
@@ -88,22 +92,42 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
       'ranked', 'clan battles', 'co-op', 'operations', 'operation',
       'scenario', 'brawl', 'arms race', 'asymmetric', 'removed mode',
       'bring back', 'missing mode', 'game mode', 'sprint', 'randoms',
-      'random battles', 'convoy', 'training room', 'public test', 'mission',
+      'random battles', 'convoy', 'training room', 'public test',
     ],
   },
   moderation: {
     label: 'Toxicity & Community',
     keywords: [
       'toxic', 'chat ban', 'report system', 'teamkill', ' afk ', 'seal clubbing',
-      'harassment', 'cheating', 'bot player', 'griefing', 'unsportsmanlike',
+      'harassment', 'cheating', 'bot player', 'griefing', 'unsportsmanlike', 'flame',
     ],
   },
 };
 
-// Flat set of all category keywords for emerging keyword detection
-const ALL_CATEGORY_KEYWORDS = new Set<string>(
-  Object.values(CATEGORIES).flatMap(c => c.keywords.map(k => k.trim())),
-);
+// ── Sentiment lexicon ──────────────────────────────────────────────────────────
+// Simple word lists to classify each message as positive / neutral / pain.
+// These are WoWs-context aware — generic "good" is intentionally omitted
+// since it is overloaded ("good torpedoes hit", "good game") and adds noise.
+
+const POSITIVE_WORDS = [
+  'love', 'amazing', 'awesome', 'fantastic', 'wonderful', 'perfect', 'enjoy',
+  'really fun', 'great fun', 'cool', 'appreciate', 'thank', 'brilliant', 'epic',
+  'impressive', 'happy', 'satisf', 'exciting', 'helpful', 'recommend',
+  'well done', 'good job', 'nice job', 'well played', 'favourite', 'favorite',
+  'love it', 'nailed it', 'great addition', 'love this', 'keep it up',
+];
+
+const NEGATIVE_WORDS = [
+  'frustrat', 'annoy', 'terrible', 'awful', 'hate', 'disappoint',
+  'useless', 'garbage', 'trash', 'boring', 'unfair', 'ridiculous',
+  'pathetic', 'stupid', 'disgust', 'angry', 'outrag',
+  'cheat', 'scam', 'ruin', 'incompetent', 'neglect', 'cashgrab',
+  'p2w', 'pay2win', 'unplayable', 'unacceptable',
+  'greed', 'greedy', 'cancer', 'bullshit',
+  'shameful', 'embarrassing', 'predatory', 'exploit',
+  'rigged', 'waste of', 'money grab', 'disaster', 'failure',
+  'disgusting', 'outrageous', 'horrible', 'broken game',
+];
 
 // ── Text helpers ───────────────────────────────────────────────────────────────
 
@@ -163,7 +187,6 @@ const STOPWORDS = new Set([
   'important', 'different', 'possible', 'certain', 'specific', 'current',
   'problem', 'problems', 'reason', 'result', 'answer', 'example',
   'instead', 'against', 'around', 'really', 'though', 'almost', 'entire',
-  'someone', 'anyone', 'nothing', 'something', 'anything', 'together',
   'number', 'amount', 'enough', 'little', 'several', 'various',
   'within', 'beyond', 'toward', 'across', 'behind', 'beside',
   // More generics that keep sneaking through
@@ -173,7 +196,7 @@ const STOPWORDS = new Set([
   // Fragments & filler
   'dont', 'doesnt', 'didnt', 'cant', 'wont', 'isnt', 'wasnt', 'arent',
   'havent', 'hadnt', 'hasnt', 'also', 'yeah', 'yep', 'nope', 'okay',
-  'think', 'think', 'maybe', 'whatever', 'whenever', 'however',
+  'think', 'maybe', 'whatever', 'whenever', 'however',
   // Generic adverbs / sentiment words that add no signal
   'currently', 'usually', 'mainly', 'following', 'changing', 'older',
   'awful', 'chance', 'hours', 'impact', 'express',
@@ -188,10 +211,32 @@ const STOPWORDS = new Set([
   'shoots', 'builds', 'stats', 'chance', 'reload',
 ]);
 
+// Flat set of all category keywords for emerging keyword detection
+const ALL_CATEGORY_KEYWORDS = new Set<string>(
+  Object.values(CATEGORIES).flatMap(c => c.keywords.map(k => k.trim())),
+);
+
 // Pre-computed list of single-word category keywords for fast substring matching
 const SINGLE_WORD_CATEGORY_KEYWORDS = Array.from(ALL_CATEGORY_KEYWORDS)
   .filter(kw => !kw.trim().includes(' '))
   .map(kw => kw.trim());
+
+function scoreMessage(content: string): 'pain' | 'positive' | 'neutral' {
+  const lower = content.toLowerCase();
+  const negHits = NEGATIVE_WORDS.filter(w => lower.includes(w)).length;
+  const posHits = POSITIVE_WORDS.filter(w => lower.includes(w)).length;
+  const net = posHits - negHits * 1.5;
+  if (net > 0) return 'positive';
+  if (net < 0) return 'pain';
+  return 'neutral';
+}
+
+function matchCategories(text: string): string[] {
+  const padded = ` ${text.toLowerCase()} `;
+  return Object.entries(CATEGORIES)
+    .filter(([, { keywords }]) => keywords.some(kw => padded.includes(kw)))
+    .map(([id]) => id);
+}
 
 function extractWords(text: string): string[] {
   return text
@@ -203,8 +248,7 @@ function extractWords(text: string): string[] {
       if (STOPWORDS.has(w)) return false;
       if (/^user\d+$/.test(w)) return false;   // UserN labels
       if (/^\d+$/.test(w)) return false;        // pure numbers
-      // Filter words whose stem is already covered by a category keyword.
-      // "rewards" contains "reward", "grinding" contains "grind", etc.
+      // Filter words whose stem is already covered by a category keyword
       for (const kw of SINGLE_WORD_CATEGORY_KEYWORDS) {
         if (w.includes(kw)) return false;
       }
@@ -212,63 +256,60 @@ function extractWords(text: string): string[] {
     });
 }
 
-function matchCategories(text: string): string[] {
-  const padded = ` ${text.toLowerCase()} `;
-  return Object.entries(CATEGORIES)
-    .filter(([, { keywords }]) => keywords.some(kw => padded.includes(kw)))
-    .map(([id]) => id);
+// ── Message DB helpers ─────────────────────────────────────────────────────────
+
+function openMsgDb(): Database.Database {
+  return new Database(config.messageDbPath, { readonly: true, fileMustExist: true });
 }
 
-// ── Main categorization ────────────────────────────────────────────────────────
+// ── Core daily processing ──────────────────────────────────────────────────────
 
-type ItemKind = 'pain_point' | 'positive' | 'topic';
-
-export function categorizeAndStorePulseReport(pulse: PulseResult, date: string): void {
+function processDay(date: string, msgDb: Database.Database): void {
   const db = getDb();
-  const moodScore = Math.min(5, Math.max(1, pulse.mood_score ?? 3));
 
-  // Normalise citations to string keys (JSON.parse converts numeric keys → strings)
-  const citationMap: Record<string, string> = {};
-  if (pulse.citations) {
-    for (const [k, v] of Object.entries(pulse.citations)) {
-      citationMap[String(k)] = v as string;
-    }
+  // UTC midnight boundaries for the date
+  const startMs = Date.parse(`${date}T00:00:00.000Z`);
+  const endMs   = startMs + 86_400_000;
+
+  const messages = msgDb.prepare(
+    'SELECT content FROM discord_messages WHERE created_at >= ? AND created_at < ?',
+  ).all(startMs, endMs) as { content: string }[];
+
+  if (messages.length === 0) {
+    logger.debug(`[narrative] No messages for ${date} — skipping`);
+    return;
   }
 
-  // Collect all items
-  const tagged: { kind: ItemKind; item: PulseItem; citedText: string }[] = [];
-  const processItems = (items: PulseItem[], kind: ItemKind) => {
-    for (const item of items) {
-      const citedText = item.msgs
-        .map(idx => citationMap[String(idx)] ?? '')
-        .filter(Boolean)
-        .join(' ');
-      tagged.push({ kind, item, citedText });
-    }
-  };
-  processItems(pulse.topics, 'topic');
-  processItems(pulse.pain_points, 'pain_point');
-  processItems(pulse.positives, 'positive');
-
   // Per-category aggregation
-  const catData = new Map<string, { pain: number; pos: number; topic: number; items: string[] }>();
+  const catData = new Map<string, { pain: number; pos: number; neutral: number }>();
 
-  for (const { kind, item, citedText } of tagged) {
-    const fullText = `${item.text} ${citedText}`;
-    const cats = matchCategories(fullText);
-    for (const cat of cats) {
-      if (!catData.has(cat)) catData.set(cat, { pain: 0, pos: 0, topic: 0, items: [] });
-      const d = catData.get(cat)!;
-      if (kind === 'pain_point') d.pain++;
-      else if (kind === 'positive') d.pos++;
-      else d.topic++;
-      d.items.push(item.text);
+  // Emerging keywords: count distinct messages containing each word
+  const wordCounts = new Map<string, number>();
+
+  for (const { content } of messages) {
+    const cats = matchCategories(content);
+    if (cats.length > 0) {
+      const score = scoreMessage(content);
+      for (const cat of cats) {
+        if (!catData.has(cat)) catData.set(cat, { pain: 0, pos: 0, neutral: 0 });
+        const d = catData.get(cat)!;
+        if (score === 'pain') d.pain++;
+        else if (score === 'positive') d.pos++;
+        else d.neutral++;
+      }
+    }
+
+    // Extract emerging keywords from every message (including uncategorised ones)
+    const words = new Set(extractWords(content));
+    for (const word of words) {
+      wordCounts.set(word, (wordCounts.get(word) ?? 0) + 1);
     }
   }
 
   const upsert = db.prepare(`
-    INSERT INTO narrative_daily (date, category, pain_count, positive_count, topic_count, sentiment, mood_ref, items_json)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO narrative_daily
+      (date, category, pain_count, positive_count, topic_count, sentiment, mood_ref, items_json)
+    VALUES (?, ?, ?, ?, ?, ?, 3.0, NULL)
     ON CONFLICT(date, category) DO UPDATE SET
       pain_count     = excluded.pain_count,
       positive_count = excluded.positive_count,
@@ -279,32 +320,91 @@ export function categorizeAndStorePulseReport(pulse: PulseResult, date: string):
   `);
 
   for (const [cat, d] of catData.entries()) {
-    const total = d.pain + d.pos + d.topic;
-    // pain items → 1.5, topic items → mood_score, positive items → 4.5
-    const sentiment = (d.pain * 1.5 + d.topic * moodScore + d.pos * 4.5) / total;
-    upsert.run(date, cat, d.pain, d.pos, d.topic, sentiment, moodScore, JSON.stringify(d.items));
-  }
-
-  // Emerging keywords: words in items not covered by any category keyword
-  const wordCounts = new Map<string, number>();
-  for (const { item, citedText } of tagged) {
-    const words = new Set(extractWords(`${item.text} ${citedText}`));
-    for (const word of words) {
-      if (!ALL_CATEGORY_KEYWORDS.has(word)) {
-        wordCounts.set(word, (wordCounts.get(word) ?? 0) + 1);
-      }
-    }
+    const total = d.pain + d.pos + d.neutral;
+    // pain → 1.5, neutral → 3.0, positive → 4.5
+    const sentiment = Math.min(5, Math.max(1,
+      (d.pain * 1.5 + d.neutral * 3.0 + d.pos * 4.5) / total,
+    ));
+    upsert.run(date, cat, d.pain, d.pos, d.neutral, sentiment);
   }
 
   const kwUpsert = db.prepare(`
     INSERT INTO narrative_keywords (date, keyword, count) VALUES (?, ?, ?)
     ON CONFLICT(date, keyword) DO UPDATE SET count = excluded.count
   `);
+
+  let kwCount = 0;
   for (const [word, count] of wordCounts.entries()) {
-    if (count >= 2) kwUpsert.run(date, word, count);
+    // Require ≥5 messages — raw message volume is much higher than pulse items
+    if (count >= 5) {
+      kwUpsert.run(date, word, count);
+      kwCount++;
+    }
   }
 
-  logger.info(`[narrative] Categorized ${date}: ${catData.size} categories, ${wordCounts.size} keywords`);
+  logger.info(
+    `[narrative] Processed ${date}: ${messages.length} messages → ` +
+    `${catData.size} categories, ${kwCount} keywords`,
+  );
+}
+
+/** Process yesterday's messages. Called by the daily cron at 01:00 CET. */
+export function processYesterdayFromMessages(): void {
+  const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+  try {
+    const msgDb = openMsgDb();
+    try {
+      processDay(yesterday, msgDb);
+    } finally {
+      msgDb.close();
+    }
+  } catch (err) {
+    logger.warn('[narrative] processYesterdayFromMessages failed:', err);
+  }
+}
+
+// ── Backfill ───────────────────────────────────────────────────────────────────
+
+export function reprocessNarrativeHistory(): { processed: number; errors: number } {
+  const db = getDb();
+
+  // Wipe existing derived data so stale rows from old taxonomy/stopwords don't persist
+  db.prepare('DELETE FROM narrative_daily').run();
+  db.prepare('DELETE FROM narrative_keywords').run();
+  logger.info('[narrative] Cleared narrative tables for full reprocess');
+
+  let msgDb: Database.Database;
+  try {
+    msgDb = openMsgDb();
+  } catch (err) {
+    logger.error('[narrative] Could not open message DB for reprocess:', err);
+    return { processed: 0, errors: 1 };
+  }
+
+  // Find all distinct UTC calendar dates that have messages
+  const dates = (msgDb.prepare(
+    `SELECT DISTINCT date(created_at / 1000, 'unixepoch') AS d
+     FROM discord_messages ORDER BY d ASC`,
+  ).all() as { d: string }[]).map(r => r.d);
+
+  let processed = 0;
+  let errors = 0;
+
+  for (const date of dates) {
+    try {
+      processDay(date, msgDb);
+      processed++;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`[narrative] Failed to process ${date}: ${msg}`);
+      errors++;
+    }
+  }
+
+  msgDb.close();
+
+  logger.info(`[narrative] Reprocess complete: ${processed} ok, ${errors} errors`);
+  return { processed, errors };
 }
 
 // ── Heatmap ────────────────────────────────────────────────────────────────────
@@ -336,8 +436,8 @@ export function getNarrativeHeatmap(weeks = 12): HeatmapResponse {
 
     const rows = db.prepare(`
       SELECT category,
-             AVG(sentiment) as avg_sentiment,
-             SUM(pain_count + positive_count + topic_count) as total_items
+             AVG(sentiment)                                   AS avg_sentiment,
+             SUM(pain_count + positive_count + topic_count)   AS total_items
       FROM narrative_daily
       WHERE date >= ? AND date <= ?
       GROUP BY category
@@ -356,7 +456,6 @@ export function getNarrativeHeatmap(weeks = 12): HeatmapResponse {
       }
     }
 
-    // Label: "Mar 10" style
     const label = weekStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
     result.push({ weekLabel: label, weekStart: startStr, categories });
   }
@@ -389,22 +488,22 @@ export interface DriftResponse {
 
 export function getNarrativeDrift(): DriftResponse {
   const db = getDb();
-  const now = new Date();
+  const now  = new Date();
   const day0  = now.toISOString().slice(0, 10);
-  const day7  = new Date(now.getTime() - 7  * 86400000).toISOString().slice(0, 10);
-  const day14 = new Date(now.getTime() - 14 * 86400000).toISOString().slice(0, 10);
+  const day7  = new Date(now.getTime() -  7 * 86_400_000).toISOString().slice(0, 10);
+  const day14 = new Date(now.getTime() - 14 * 86_400_000).toISOString().slice(0, 10);
 
   type AggRow = { category: string; avg_sentiment: number; total_items: number };
 
   const currentWeek = db.prepare(`
-    SELECT category, AVG(sentiment) as avg_sentiment,
-           SUM(pain_count + positive_count + topic_count) as total_items
+    SELECT category, AVG(sentiment) AS avg_sentiment,
+           SUM(pain_count + positive_count + topic_count) AS total_items
     FROM narrative_daily WHERE date > ? AND date <= ? GROUP BY category
   `).all(day7, day0) as AggRow[];
 
   const priorWeek = db.prepare(`
-    SELECT category, AVG(sentiment) as avg_sentiment,
-           SUM(pain_count + positive_count + topic_count) as total_items
+    SELECT category, AVG(sentiment) AS avg_sentiment,
+           SUM(pain_count + positive_count + topic_count) AS total_items
     FROM narrative_daily WHERE date > ? AND date <= ? GROUP BY category
   `).all(day14, day7) as AggRow[];
 
@@ -421,12 +520,10 @@ export function getNarrativeDrift(): DriftResponse {
         ? (curr.total_items - prior.total_items) / prior.total_items
         : 0;
 
-      // Require meaningful data in BOTH periods before alerting.
-      // High minimum on prior prevents false spikes when the bot is newly deployed
-      // and the comparison window is lopsided (e.g. 7 recent reports vs 1 old).
-      const bothHaveData = curr.total_items >= 8 && prior.total_items >= 15;
+      // Scaled thresholds for raw message volumes (~10× more items than pulse-based)
+      const bothHaveData = curr.total_items >= 80 && prior.total_items >= 150;
 
-      if (sentDrop <= -0.2 && bothHaveData) {
+      if (sentDrop <= -0.3 && bothHaveData) {
         alerts.push({
           level: 'danger',
           category: curr.category,
@@ -434,18 +531,17 @@ export function getNarrativeDrift(): DriftResponse {
           detail: `Sentiment ${prior.avg_sentiment.toFixed(2)} → ${curr.avg_sentiment.toFixed(2)} · vol ${volChange >= 0 ? '+' : ''}${(volChange * 100).toFixed(0)}%`,
           currentSentiment: Math.round(curr.avg_sentiment * 100) / 100,
           priorSentiment:   Math.round(prior.avg_sentiment * 100) / 100,
-          volumeChange: Math.round(volChange * 100) / 100,
+          volumeChange:     Math.round(volChange * 100) / 100,
         });
       } else if (volChange >= 0.5 && bothHaveData) {
-        // Volume threshold 50% (not 30%) and both periods need ≥5 items
         alerts.push({
           level: 'warning',
           category: curr.category,
           label,
-          detail: `Volume up ${(volChange * 100).toFixed(0)}% WoW (${curr.total_items} vs ${prior.total_items} items)`,
+          detail: `Volume up ${(volChange * 100).toFixed(0)}% WoW (${curr.total_items} vs ${prior.total_items} messages)`,
           currentSentiment: Math.round(curr.avg_sentiment * 100) / 100,
           priorSentiment:   Math.round(prior.avg_sentiment * 100) / 100,
-          volumeChange: Math.round(volChange * 100) / 100,
+          volumeChange:     Math.round(volChange * 100) / 100,
         });
       }
     }
@@ -454,20 +550,19 @@ export function getNarrativeDrift(): DriftResponse {
   // Emerging keywords: appeared more this week vs last
   type KwRow = { keyword: string; total: number };
   const emergingKw = db.prepare(`
-    SELECT keyword, SUM(count) as total FROM narrative_keywords
-    WHERE date > ? GROUP BY keyword HAVING total >= 10 ORDER BY total DESC LIMIT 10
+    SELECT keyword, SUM(count) AS total FROM narrative_keywords
+    WHERE date > ? GROUP BY keyword HAVING total >= 50 ORDER BY total DESC LIMIT 10
   `).all(day7) as KwRow[];
 
   const priorKw = db.prepare(`
-    SELECT keyword, SUM(count) as total FROM narrative_keywords
+    SELECT keyword, SUM(count) AS total FROM narrative_keywords
     WHERE date > ? AND date <= ? GROUP BY keyword
   `).all(day14, day7) as KwRow[];
   const priorKwMap = new Map(priorKw.map(k => [k.keyword, k.total]));
 
   for (const kw of emergingKw) {
     const priorCount = priorKwMap.get(kw.keyword) ?? 0;
-    // Only alert if keyword is genuinely new or significantly spiked vs prior period
-    if (kw.total >= 10 && kw.total > priorCount * 3) {
+    if (kw.total > priorCount * 3) {
       alerts.push({
         level: 'emerging',
         category: 'emerging',
@@ -502,7 +597,7 @@ export interface DailyPoint {
 
 export function getCategoryTrend(category: string, days = 90): DailyPoint[] {
   const db = getDb();
-  const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
   return db.prepare(`
     SELECT date, sentiment,
            pain_count + positive_count + topic_count AS item_count,
@@ -524,73 +619,30 @@ export interface EmergingKeyword {
 
 export function getEmergingKeywords(days = 14): EmergingKeyword[] {
   const db = getDb();
-  const now = Date.now();
+  const now      = Date.now();
   const halfDays = Math.ceil(days / 2);
-  const recentSince = new Date(now - halfDays * 86400000).toISOString().slice(0, 10);
-  const allSince    = new Date(now - days  * 86400000).toISOString().slice(0, 10);
+  const recentSince = new Date(now - halfDays * 86_400_000).toISOString().slice(0, 10);
+  const allSince    = new Date(now - days   * 86_400_000).toISOString().slice(0, 10);
 
   type KwRow = { keyword: string; total: number };
   const recent = db.prepare(`
-    SELECT keyword, SUM(count) as total FROM narrative_keywords
-    WHERE date >= ? GROUP BY keyword ORDER BY total DESC LIMIT 40
+    SELECT keyword, SUM(count) AS total FROM narrative_keywords
+    WHERE date >= ? GROUP BY keyword ORDER BY total DESC LIMIT 50
   `).all(recentSince) as KwRow[];
 
   const prior = db.prepare(`
-    SELECT keyword, SUM(count) as total FROM narrative_keywords
+    SELECT keyword, SUM(count) AS total FROM narrative_keywords
     WHERE date >= ? AND date < ? GROUP BY keyword
   `).all(allSince, recentSince) as KwRow[];
   const priorMap = new Map(prior.map(k => [k.keyword, k.total]));
 
   return recent
-    .filter(r => r.total >= 2)
+    .filter(r => r.total >= 10)
     .map(r => ({
       keyword:     r.keyword,
       recentCount: r.total,
       priorCount:  priorMap.get(r.keyword) ?? 0,
-      heat: r.total >= 8 ? 'hot' : r.total >= 4 ? 'warm' : 'cool' as 'hot' | 'warm' | 'cool',
+      // Thresholds scaled for raw message volumes
+      heat: (r.total >= 50 ? 'hot' : r.total >= 25 ? 'warm' : 'cool') as 'hot' | 'warm' | 'cool',
     }));
-}
-
-// ── Backfill historical reports ────────────────────────────────────────────────
-
-export function reprocessNarrativeHistory(): { processed: number; errors: number } {
-  const db = getDb();
-
-  // Wipe existing derived data so stale rows from old taxonomy/stopwords don't persist
-  db.prepare('DELETE FROM narrative_daily').run();
-  db.prepare('DELETE FROM narrative_keywords').run();
-  logger.info('[narrative] Cleared narrative tables for full reprocess');
-
-  const reports = db.prepare(
-    `SELECT taken_at, raw_json FROM sentiment_reports ORDER BY taken_at ASC`,
-  ).all() as { taken_at: string; raw_json: string }[];
-
-  let processed = 0;
-  let errors = 0;
-
-  for (const report of reports) {
-    try {
-      const pulse = JSON.parse(report.raw_json) as PulseResult;
-      // Older reports stored items as plain strings rather than PulseItem objects.
-      // Normalise them so categorizeAndStorePulseReport always gets the expected shape.
-      const normaliseItems = (arr: unknown[]): PulseItem[] =>
-        arr.map(item =>
-          typeof item === 'string'
-            ? { text: item, msgs: [], authors: 0 }
-            : item as PulseItem,
-        );
-      pulse.topics      = normaliseItems((pulse.topics      as unknown[]) ?? []);
-      pulse.pain_points = normaliseItems((pulse.pain_points as unknown[]) ?? []);
-      pulse.positives   = normaliseItems((pulse.positives   as unknown[]) ?? []);
-      categorizeAndStorePulseReport(pulse, report.taken_at.slice(0, 10));
-      processed++;
-    } catch (err) {
-      const msg = err instanceof Error ? `${err.message} | ${err.stack?.split('\n')[1]?.trim()}` : String(err);
-      logger.warn(`[narrative] Failed to reprocess ${report.taken_at}: ${msg}`);
-      errors++;
-    }
-  }
-
-  logger.info(`[narrative] Reprocess complete: ${processed} ok, ${errors} errors`);
-  return { processed, errors };
 }
