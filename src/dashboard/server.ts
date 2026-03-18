@@ -31,6 +31,13 @@ import {
 } from '../store/staffDb';
 import { invalidateStaffCache } from '../staffTracker';
 import { createToken, listTokens, revokeToken, verifyToken } from '../store/tokenDb';
+import {
+  getCategoryTrend,
+  getEmergingKeywords,
+  getNarrativeDrift,
+  getNarrativeHeatmap,
+  reprocessNarrativeHistory,
+} from '../store/narrativeDb';
 
 const app = express();
 app.use(express.json());
@@ -516,6 +523,59 @@ app.post('/api/tokens/verify', (req: Request, res: Response) => {
     return;
   }
   res.json({ valid: verifyToken(token) });
+});
+
+// ── Narrative drift tracking ───────────────────────────────────────────────────
+
+app.get('/api/narrative/heatmap', (req: Request, res: Response) => {
+  try {
+    const weeks = Math.min(Math.max(Number(req.query.weeks) || 12, 4), 52);
+    res.json(getNarrativeHeatmap(weeks));
+  } catch (error) {
+    logger.error('[dashboard] /api/narrative/heatmap error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/narrative/drift', (_req: Request, res: Response) => {
+  try {
+    res.json(getNarrativeDrift());
+  } catch (error) {
+    logger.error('[dashboard] /api/narrative/drift error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/narrative/trend', (req: Request, res: Response) => {
+  try {
+    const category = String(req.query.category ?? '');
+    const days = Math.min(Math.max(Number(req.query.days) || 90, 7), 365);
+    if (!category) { res.status(400).json({ error: 'category required' }); return; }
+    res.json(getCategoryTrend(category, days));
+  } catch (error) {
+    logger.error('[dashboard] /api/narrative/trend error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/narrative/keywords', (req: Request, res: Response) => {
+  try {
+    const days = Math.min(Math.max(Number(req.query.days) || 14, 7), 90);
+    res.json(getEmergingKeywords(days));
+  } catch (error) {
+    logger.error('[dashboard] /api/narrative/keywords error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/narrative/reprocess', (_req: Request, res: Response) => {
+  try {
+    const result = reprocessNarrativeHistory();
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    logger.error('[dashboard] /api/narrative/reprocess error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 export function startDashboard(): void {

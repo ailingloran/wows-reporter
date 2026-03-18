@@ -130,6 +130,37 @@ CREATE TABLE IF NOT EXISTS access_tokens (
   expires_at TEXT    -- NULL = never expires
 );
 
+-- ── Narrative Drift Tracking ──────────────────────────────────────────────────
+
+-- Daily per-category sentiment aggregates derived from Community Pulse reports
+CREATE TABLE IF NOT EXISTS narrative_daily (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  date           TEXT    NOT NULL,  -- YYYY-MM-DD
+  category       TEXT    NOT NULL,  -- e.g. 'economy', 'balance', etc.
+  pain_count     INTEGER NOT NULL DEFAULT 0,
+  positive_count INTEGER NOT NULL DEFAULT 0,
+  topic_count    INTEGER NOT NULL DEFAULT 0,
+  sentiment      REAL    NOT NULL DEFAULT 3.0,  -- 1–5 composite score
+  mood_ref       REAL    NOT NULL DEFAULT 3.0,  -- overall mood_score of that report
+  items_json     TEXT,                           -- JSON array of matched item texts
+  UNIQUE(date, category)
+);
+
+-- Emerging keyword counts per day (words not in any category taxonomy)
+CREATE TABLE IF NOT EXISTS narrative_keywords (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  date     TEXT    NOT NULL,
+  keyword  TEXT    NOT NULL,
+  count    INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(date, keyword)
+);
+
+CREATE INDEX IF NOT EXISTS idx_narrative_daily_date
+  ON narrative_daily(date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_narrative_keywords_date
+  ON narrative_keywords(date DESC);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_snapshots_period_taken
   ON snapshots(period, taken_at DESC);

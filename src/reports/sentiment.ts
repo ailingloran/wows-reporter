@@ -14,6 +14,7 @@ import { collectRecentMessages } from '../collectors/messageCollector';
 import { analyseCommunityPulse, PulseItem, PulseResult } from '../api/openai';
 import { postDailyReport } from '../api/discord';
 import { getSentimentReports, insertSentimentReport, SentimentReportRow } from '../store/db';
+import { categorizeAndStorePulseReport } from '../store/narrativeDb';
 import { formatDate } from './formatters';
 
 export type SentimentSource = 'db' | 'live';
@@ -215,6 +216,13 @@ export async function runSentimentReport(source: SentimentSource = 'db'): Promis
   // ── Persist to DB ──────────────────────────────────────────────────────────
   const takenAt = new Date().toISOString();
   insertSentimentReport(takenAt, pulse.mood, JSON.stringify(pulse));
+
+  // ── Narrative drift categorization ─────────────────────────────────────────
+  try {
+    categorizeAndStorePulseReport(pulse, takenAt.slice(0, 10));
+  } catch (err) {
+    logger.warn('[sentiment] Narrative categorization failed (non-fatal):', err);
+  }
 
   // ── Build embed ────────────────────────────────────────────────────────────
   const today = formatDate(new Date());
