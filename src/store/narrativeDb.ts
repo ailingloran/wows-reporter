@@ -571,10 +571,21 @@ export function reprocessNarrativeHistory(): { processed: number; errors: number
   for (const report of reports) {
     try {
       const pulse = JSON.parse(report.raw_json) as PulseResult;
+      // Older reports stored items as plain strings rather than PulseItem objects.
+      // Normalise them so categorizeAndStorePulseReport always gets the expected shape.
+      const normaliseItems = (arr: unknown[]): PulseItem[] =>
+        arr.map(item =>
+          typeof item === 'string'
+            ? { text: item, msgs: [], authors: 0 }
+            : item as PulseItem,
+        );
+      pulse.topics      = normaliseItems((pulse.topics      as unknown[]) ?? []);
+      pulse.pain_points = normaliseItems((pulse.pain_points as unknown[]) ?? []);
+      pulse.positives   = normaliseItems((pulse.positives   as unknown[]) ?? []);
       categorizeAndStorePulseReport(pulse, report.taken_at.slice(0, 10));
       processed++;
-    } catch {
-      logger.warn(`[narrative] Failed to reprocess ${report.taken_at}`);
+    } catch (err) {
+      logger.warn(`[narrative] Failed to reprocess ${report.taken_at}:`, err);
       errors++;
     }
   }
