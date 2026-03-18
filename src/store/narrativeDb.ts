@@ -26,12 +26,20 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
     label: 'Balance & Meta',
     keywords: [
       'overpowered', ' op ', 'broken', 'nerf', 'buff', 'meta', 'he spam', 'fire chance',
-      'flooding', 'matchmaking', 'uptiered', 'tier spread', 'unbalanced', 'overtuned',
-      'balance', 'powercreep', 'power creep', 'tiers', ' tier ', 'secondary',
+      'flooding', 'unbalanced', 'overtuned',
+      'balance', 'powercreep', 'power creep', ' tier ', 'secondary',
       'secondaries', 'cruiser', 'cruisers', 'destroyer', 'destroyers',
       'battleship', 'battleships', 'armor', 'armour', 'radar',
       'concealment', 'dispersion', 'accuracy', 'sigma', 'overmatch', 'ricochet',
-      'hydro', 'sonar', 'smoke', 'detect',
+      'hydro', 'smoke', 'detect',
+    ],
+  },
+  matchmaking: {
+    label: 'Matchmaking',
+    keywords: [
+      'matchmaking', 'matchmaker', 'uptiered', 'tier spread', 'mm ', ' sbmm',
+      'queue time', 'team balance', 'divisions', 'one-sided', 'uneven teams',
+      'seal clubbing', 'bottom tier', 'top tier', 'spread',
     ],
   },
   carriers: {
@@ -46,6 +54,7 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
     keywords: [
       'submarine', ' sub ', ' subs ', 'depth charge', 'torpedo soup',
       'ping', 'pinging', 'homing torpedo', 'acoustic', 'submerged',
+      'asw', 'anti-submarine', 'hydrophone', 'sonar', 'patrolling',
       'torps', 'torpedo', 'torpedoes',
     ],
   },
