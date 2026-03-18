@@ -19,6 +19,7 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
       'credit', 'doubloon', 'free xp', 'coal', 'steel', 'grind', 'pay to win', 'p2w',
       'premium', 'expensiv', 'crate', 'container', 'research bureau', 'dockyard',
       'cost', 'price', 'loot box', 'earnable', 'resource', 'earn', 'reward',
+      'silver', 'snowflake', 'directive', 'campaign', 'combat mission',
     ],
   },
   balance: {
@@ -28,8 +29,9 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
       'flooding', 'matchmaking', 'uptiered', 'tier spread', 'unbalanced', 'overtuned',
       'balance', 'powercreep', 'power creep', 'tiers', ' tier ', 'secondary',
       'secondaries', 'cruiser', 'cruisers', 'destroyer', 'destroyers',
-      'battleship', 'battleships', 'armor', 'armour',
+      'battleship', 'battleships', 'armor', 'armour', 'radar',
       'concealment', 'dispersion', 'accuracy', 'sigma', 'overmatch', 'ricochet',
+      'hydro', 'sonar', 'smoke', 'detect',
     ],
   },
   carriers_subs: {
@@ -67,10 +69,10 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
   game_modes: {
     label: 'Game Modes',
     keywords: [
-      'ranked', 'clan battles', 'co-op', 'operations', 'scenario', 'brawl',
-      'arms race', 'asymmetric', 'removed mode', 'bring back', 'missing mode',
-      'game mode', 'sprint', 'randoms', 'random battles', 'convoy',
-      'training room', 'public test',
+      'ranked', 'clan battles', 'co-op', 'operations', 'operation',
+      'scenario', 'brawl', 'arms race', 'asymmetric', 'removed mode',
+      'bring back', 'missing mode', 'game mode', 'sprint', 'randoms',
+      'random battles', 'convoy', 'training room', 'public test', 'mission',
     ],
   },
   moderation: {
@@ -98,6 +100,7 @@ const STOPWORDS = new Set([
   'into', 'over', 'each', 'only', 'like', 'while', 'since', 'until',
   'after', 'before', 'above', 'below', 'between', 'through', 'during',
   'because', 'though', 'although', 'unless', 'whether', 'either',
+  'those', 'these', 'their', 'there', 'where', 'which', 'whose',
   // Common verbs
   'play', 'plays', 'played', 'playing',
   'think', 'thinks', 'thought', 'thinking',
@@ -147,23 +150,38 @@ const STOPWORDS = new Set([
   'someone', 'anyone', 'nothing', 'something', 'anything', 'together',
   'number', 'amount', 'enough', 'little', 'several', 'various',
   'within', 'beyond', 'toward', 'across', 'behind', 'beside',
+  // More generics that keep sneaking through
+  'speed', 'build', 'close', 'party', 'weeks', 'limit', 'single',
+  'rather', 'purely', 'probably', 'outside', 'choice', 'minimum',
+  'general', 'improved', 'surface', 'seconds', 'teammates', 'random',
   // Fragments & filler
   'dont', 'doesnt', 'didnt', 'cant', 'wont', 'isnt', 'wasnt', 'arent',
   'havent', 'hadnt', 'hasnt', 'also', 'yeah', 'yep', 'nope', 'okay',
   'think', 'think', 'maybe', 'whatever', 'whenever', 'however',
 ]);
 
+// Pre-computed list of single-word category keywords for fast substring matching
+const SINGLE_WORD_CATEGORY_KEYWORDS = Array.from(ALL_CATEGORY_KEYWORDS)
+  .filter(kw => !kw.trim().includes(' '))
+  .map(kw => kw.trim());
+
 function extractWords(text: string): string[] {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
-    .filter(w =>
-      w.length >= 5 &&                 // min 5 chars filters most common short words
-      !STOPWORDS.has(w) &&
-      !/^user\d+$/.test(w) &&          // filter UserN labels (User1, User73, etc.)
-      !/^\d+$/.test(w),                // filter pure numbers
-    );
+    .filter(w => {
+      if (w.length < 5) return false;
+      if (STOPWORDS.has(w)) return false;
+      if (/^user\d+$/.test(w)) return false;   // UserN labels
+      if (/^\d+$/.test(w)) return false;        // pure numbers
+      // Filter words whose stem is already covered by a category keyword.
+      // "rewards" contains "reward", "grinding" contains "grind", etc.
+      for (const kw of SINGLE_WORD_CATEGORY_KEYWORDS) {
+        if (w.includes(kw)) return false;
+      }
+      return true;
+    });
 }
 
 function matchCategories(text: string): string[] {
