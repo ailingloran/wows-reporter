@@ -492,6 +492,12 @@ export function getEmergingKeywords(days = 14): EmergingKeyword[] {
 
 export function reprocessNarrativeHistory(): { processed: number; errors: number } {
   const db = getDb();
+
+  // Wipe existing derived data so stale rows from old taxonomy/stopwords don't persist
+  db.prepare('DELETE FROM narrative_daily').run();
+  db.prepare('DELETE FROM narrative_keywords').run();
+  logger.info('[narrative] Cleared narrative tables for full reprocess');
+
   const reports = db.prepare(
     `SELECT taken_at, raw_json FROM sentiment_reports ORDER BY taken_at ASC`,
   ).all() as { taken_at: string; raw_json: string }[];
