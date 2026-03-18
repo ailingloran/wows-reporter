@@ -27,7 +27,8 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
       'overpowered', ' op ', 'broken', 'nerf', 'buff', 'meta', 'he spam', 'fire chance',
       'flooding', 'matchmaking', 'uptiered', 'tier spread', 'unbalanced', 'overtuned',
       'balance', 'powercreep', 'power creep', 'tiers', ' tier ', 'secondary',
-      'secondaries', 'cruiser', 'destroyer', 'battleship', 'armor', 'armour',
+      'secondaries', 'cruiser', 'cruisers', 'destroyer', 'destroyers',
+      'battleship', 'battleships', 'armor', 'armour',
       'concealment', 'dispersion', 'accuracy', 'sigma', 'overmatch', 'ricochet',
     ],
   },
@@ -36,7 +37,7 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
     keywords: [
       'carrier', 'submarine', ' sub ', 'depth charge', 'torpedo soup', 'aerial',
       'airstrike', 'rocket plane', 'attack aircraft', 'spotting plane',
-      ' cv ', ' cvs ', ' subs ',
+      ' cv ', ' cvs ', ' subs ', 'torps', 'torpedo', 'torpedoes',
     ],
   },
   new_content: {
@@ -68,7 +69,8 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
     keywords: [
       'ranked', 'clan battles', 'co-op', 'operations', 'scenario', 'brawl',
       'arms race', 'asymmetric', 'removed mode', 'bring back', 'missing mode',
-      'game mode', 'sprint',
+      'game mode', 'sprint', 'randoms', 'random battles', 'convoy',
+      'training room', 'public test',
     ],
   },
   moderation: {
@@ -133,9 +135,22 @@ const STOPWORDS = new Set([
   // WoWs generic (too broad to be meaningful as emerging signals)
   'discussing', 'discussion', 'community', 'server', 'user', 'users',
   'battle', 'battles', 'match', 'matches', 'round', 'rounds', 'average',
+  // More adverbs / adjectives
+  'without', 'especially', 'higher', 'lower', 'actual', 'actually',
+  'already', 'please', 'number', 'learn', 'however', 'mostly', 'another',
+  'random', 'strong', 'heavy', 'world', 'system', 'health', 'damage',
+  'thats', 'talking', 'mostly', 'pretty', 'seriously', 'basically',
+  'literally', 'honestly', 'totally', 'completely', 'absolutely',
+  'important', 'different', 'possible', 'certain', 'specific', 'current',
+  'problem', 'problems', 'reason', 'result', 'answer', 'example',
+  'instead', 'against', 'around', 'really', 'though', 'almost', 'entire',
+  'someone', 'anyone', 'nothing', 'something', 'anything', 'together',
+  'number', 'amount', 'enough', 'little', 'several', 'various',
+  'within', 'beyond', 'toward', 'across', 'behind', 'beside',
   // Fragments & filler
   'dont', 'doesnt', 'didnt', 'cant', 'wont', 'isnt', 'wasnt', 'arent',
   'havent', 'hadnt', 'hasnt', 'also', 'yeah', 'yep', 'nope', 'okay',
+  'think', 'think', 'maybe', 'whatever', 'whenever', 'however',
 ]);
 
 function extractWords(text: string): string[] {
@@ -360,8 +375,10 @@ export function getNarrativeDrift(): DriftResponse {
         ? (curr.total_items - prior.total_items) / prior.total_items
         : 0;
 
-      // Require both periods to have real data before alerting
-      const bothHaveData = curr.total_items >= 5 && prior.total_items >= 5;
+      // Require meaningful data in BOTH periods before alerting.
+      // High minimum on prior prevents false spikes when the bot is newly deployed
+      // and the comparison window is lopsided (e.g. 7 recent reports vs 1 old).
+      const bothHaveData = curr.total_items >= 8 && prior.total_items >= 15;
 
       if (sentDrop <= -0.2 && bothHaveData) {
         alerts.push({
