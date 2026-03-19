@@ -167,10 +167,15 @@ export function getFtsHealth(): FtsHealth {
  * Removes FTS5 special characters and joins with OR.
  */
 function buildFtsQuery(keywords: string[]): string {
-  return keywords
-    .map(k => k.replace(/["*()\-^:]/g, ' ').trim())
-    .filter(k => k.length >= 2)
-    .join(' OR ');
+  // Split multi-word keywords into individual words so that e.g.
+  // "Sabaton collaboration" becomes "Sabaton OR collaboration" instead of
+  // FTS5 implicit AND (Sabaton AND collaboration).
+  const words = keywords
+    .flatMap(k => k.replace(/["*()\-^:]/g, ' ').trim().split(/\s+/))
+    .map(w => w.trim())
+    .filter(w => w.length >= 3)
+    .filter((w, i, arr) => arr.findIndex(x => x.toLowerCase() === w.toLowerCase()) === i);
+  return words.join(' OR ');
 }
 
 /**
