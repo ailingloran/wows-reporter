@@ -227,23 +227,34 @@ export async function answerQuestion(
     content: `Here are ${analysed} Discord messages:\n\n${messageBlock}\n\nQuestion: ${question}`,
   });
 
-  try {
-    const response = await getClient().chat.completions.create({
-      model: 'gpt-5.1',
-      max_completion_tokens: 800,
-      messages: chatMessages,
-    });
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const response = await getClient().chat.completions.create({
+        model: 'gpt-5.1',
+        max_completion_tokens: 800,
+        messages: chatMessages,
+      });
 
-    const answer = response.choices[0]?.message?.content;
-    if (!answer) throw new Error('empty_response');
+      const answer = response.choices[0]?.message?.content;
+      if (!answer) {
+        if (attempt < 2) {
+          logger.warn(`[openai] Chat returned empty response, retrying (attempt ${attempt})…`);
+          continue;
+        }
+        throw new Error('empty_response');
+      }
 
-    logger.info(`[openai] Chat answered. Collected: ${collected}, analysed: ${analysed}`);
-    return { answer, collected, analysed };
-  } catch (error) {
-    const detail = formatOpenAiError(error);
-    logger.error(`[openai] Chat query failed (${detail}):`, error);
-    return { error: `OpenAI request failed - ${detail}` };
+      logger.info(`[openai] Chat answered. Collected: ${collected}, analysed: ${analysed}`);
+      return { answer, collected, analysed };
+    } catch (error) {
+      if (attempt < 2 && error instanceof Error && error.message === 'empty_response') continue;
+      const detail = formatOpenAiError(error);
+      logger.error(`[openai] Chat query failed (${detail}):`, error);
+      return { error: `OpenAI request failed - ${detail}` };
+    }
   }
+  // unreachable but satisfies TS
+  return { error: 'OpenAI request failed - empty_response' };
 }
 
 export async function analyseCommunityPulse(messages: string[]): Promise<PulseResult | null> {
