@@ -215,7 +215,7 @@ const STOPWORDS = new Set([
   'currently', 'usually', 'mainly', 'following', 'changing', 'older',
   'awful', 'chance', 'hours', 'impact', 'express',
   // Slang / Discord filler
-  'dunno', 'shrugeg', 'shrug',
+  'dunno', 'shrugeg', 'shrug', 'dashaha',
   'gonna', 'kinda', 'gotta', 'wanna', 'lemme', 'gimme',
   'guess', 'cause', 'couse', 'tho', 'tbh', 'imo', 'imho', 'ngl',
   'anyway', 'anyways', 'regardless',
