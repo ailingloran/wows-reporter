@@ -218,9 +218,18 @@ const STOPWORDS = new Set([
   'dunno', 'shrugeg', 'shrug',
   'gonna', 'kinda', 'gotta', 'wanna', 'lemme', 'gimme',
   'guess', 'cause', 'couse', 'tho', 'tbh', 'imo', 'imho', 'ngl',
+  'anyway', 'anyways', 'regardless',
+  // Generic verbs/states
   'sometimes', 'remember', 'imagine', 'started', 'years', 'money',
   'shoot', 'worth', 'whole', 'funny', 'weird', 'crazy', 'insane',
   'enemy', 'allied', 'allies', 'human', 'world', 'super',
+  'happen', 'happened', 'happens', 'called', 'tried', 'forgot',
+  'sounds', 'wonder', 'check', 'understand', 'understood',
+  'except', 'anymore', 'longer', 'faster', 'slower', 'bigger',
+  'normal', 'start', 'reset', 'fight', 'whats', 'question',
+  'stuff', 'version', 'thanks', 'thank',
+  // Contraction fragments (apostrophe stripped)
+  'wouldn', 'couldn', 'shouldn', 'weren', 'didn', 'haven',
   // URL fragments
   'https', 'http', 'discord', 'reddit', 'imgur',
   // Contraction fragments (apostrophe stripped)
