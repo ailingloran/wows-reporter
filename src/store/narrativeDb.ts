@@ -6,7 +6,9 @@
  * word lexicon. Runs independently of the Community Pulse — no GPT cost.
  *
  * Sentiment formula per category per day:
- *   (pain_msgs × 1.5 + neutral_msgs × 3.0 + positive_msgs × 4.5) / total → 1–5 scale
+ *   3.0 + (positive_frac - pain_frac × 1.5) × 8  →  clamped to 1–5
+ * This fraction-based formula amplifies the detected signal so that ~10% pain
+ * messages push the score to ~1.8, instead of being diluted by neutral messages.
  */
 
 import Database from 'better-sqlite3';
@@ -51,6 +53,7 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
       'carrier', 'aerial', 'airstrike', 'rocket plane', 'attack aircraft',
       'spotting plane', ' cv ', ' cvs ', 'aviation',
       'aircraft', 'bomber', 'torpedo bomber', 'fighter plane',
+      ' plane ', 'planes', 'radar', 'hydro',
     ],
   },
   submarines: {
@@ -110,23 +113,34 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
 // since it is overloaded ("good torpedoes hit", "good game") and adds noise.
 
 const POSITIVE_WORDS = [
-  'love', 'amazing', 'awesome', 'fantastic', 'wonderful', 'perfect', 'enjoy',
-  'really fun', 'great fun', 'cool', 'appreciate', 'thank', 'brilliant', 'epic',
-  'impressive', 'happy', 'satisf', 'exciting', 'helpful', 'recommend',
-  'well done', 'good job', 'nice job', 'well played', 'favourite', 'favorite',
-  'love it', 'nailed it', 'great addition', 'love this', 'keep it up',
+  // Strong positive
+  'love', 'amazing', 'awesome', 'fantastic', 'wonderful', 'perfect',
+  'brilliant', 'epic', 'impressive', 'exciting', 'nailed it',
+  // Common gaming positives
+  'fun', 'enjoy', 'great', 'nice', 'cool', 'good game', 'well played',
+  'well done', 'good job', 'nice job', 'great addition', 'love this',
+  'keep it up', 'really good', 'really nice', 'really fun',
+  // Appreciation
+  'appreciate', 'thank', 'happy', 'satisf', 'helpful', 'recommend',
+  'favourite', 'favorite', 'love it', 'best ship', 'best update',
+  'finally fixed', 'great job', 'nice work', 'good work',
 ];
 
 const NEGATIVE_WORDS = [
+  // Strong negative
   'frustrat', 'annoy', 'terrible', 'awful', 'hate', 'disappoint',
-  'useless', 'garbage', 'trash', 'boring', 'unfair', 'ridiculous',
-  'pathetic', 'stupid', 'disgust', 'angry', 'outrag',
-  'cheat', 'scam', 'ruin', 'incompetent', 'neglect', 'cashgrab',
-  'p2w', 'pay2win', 'unplayable', 'unacceptable',
-  'greed', 'greedy', 'cancer', 'bullshit',
-  'shameful', 'embarrassing', 'predatory', 'exploit',
-  'rigged', 'waste of', 'money grab', 'disaster', 'failure',
-  'disgusting', 'outrageous', 'horrible', 'broken game',
+  'useless', 'garbage', 'trash', 'disgusting', 'outrageous', 'horrible',
+  'pathetic', 'disgust', 'angry', 'outrag', 'shameful', 'embarrassing',
+  // Common gaming complaints
+  'broken', 'nerf ', 'needs to be nerfed', 'suck', 'sucks', 'sucked',
+  'dumb', 'lame', 'stupid', 'ridiculous', 'absurd', 'insane mechanic',
+  'unfair', 'unbalanced', 'boring', 'unplayable', 'unacceptable',
+  // Monetisation
+  'p2w', 'pay2win', 'pay to win', 'cashgrab', 'cash grab', 'money grab',
+  'greed', 'greedy', 'predatory', 'scam', 'rigged',
+  // Community
+  'cancer', 'bullshit', 'toxic', 'cheat', 'exploit', 'ruin',
+  'incompetent', 'neglect', 'waste of', 'disaster', 'failure',
 ];
 
 // ── Text helpers ───────────────────────────────────────────────────────────────
@@ -202,6 +216,11 @@ const STOPWORDS = new Set([
   'awful', 'chance', 'hours', 'impact', 'express',
   // Slang / Discord filler
   'dunno', 'shrugeg', 'shrug',
+  'gonna', 'kinda', 'gotta', 'wanna', 'lemme', 'gimme',
+  'guess', 'cause', 'couse', 'tho', 'tbh', 'imo', 'imho', 'ngl',
+  'sometimes', 'remember', 'imagine', 'started', 'years', 'money',
+  'shoot', 'worth', 'whole', 'funny', 'weird', 'crazy', 'insane',
+  'enemy', 'allied', 'allies', 'human', 'world', 'super',
   // URL fragments
   'https', 'http', 'discord', 'reddit', 'imgur',
   // Contraction fragments (apostrophe stripped)
@@ -321,9 +340,13 @@ function processDay(date: string, msgDb: Database.Database): void {
 
   for (const [cat, d] of catData.entries()) {
     const total = d.pain + d.pos + d.neutral;
-    // pain → 1.5, neutral → 3.0, positive → 4.5
+    // Fraction-based formula: amplifies detected sentiment signal so that
+    // ~10% pain messages → score ~1.8, ~10% positive → ~3.8.
+    // Neutral messages don't pull toward 3.0 — only detected sentiment counts.
+    const painFrac = d.pain / total;
+    const posFrac  = d.pos  / total;
     const sentiment = Math.min(5, Math.max(1,
-      (d.pain * 1.5 + d.neutral * 3.0 + d.pos * 4.5) / total,
+      3.0 + (posFrac - painFrac * 1.5) * 8,
     ));
     upsert.run(date, cat, d.pain, d.pos, d.neutral, sentiment);
   }
