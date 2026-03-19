@@ -227,33 +227,32 @@ export async function answerQuestion(
     content: `Here are ${analysed} Discord messages:\n\n${messageBlock}\n\nQuestion: ${question}`,
   });
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  const models = ['gpt-5.1', 'gpt-4o'];
+  for (const model of models) {
     try {
       const response = await getClient().chat.completions.create({
-        model: 'gpt-5.1',
-        max_completion_tokens: 800,
+        model,
+        max_completion_tokens: model === 'gpt-5.1' ? 4000 : 800,
         messages: chatMessages,
       });
 
       const answer = response.choices[0]?.message?.content;
       if (!answer) {
-        if (attempt < 2) {
-          logger.warn(`[openai] Chat returned empty response, retrying (attempt ${attempt})…`);
-          continue;
-        }
-        throw new Error('empty_response');
+        logger.warn(`[openai] Chat returned empty response from ${model}, trying fallback…`);
+        continue;
       }
 
+      if (model !== 'gpt-5.1') logger.info(`[openai] Chat answered via fallback model ${model}.`);
       logger.info(`[openai] Chat answered. Collected: ${collected}, analysed: ${analysed}`);
       return { answer, collected, analysed };
     } catch (error) {
-      if (attempt < 2 && error instanceof Error && error.message === 'empty_response') continue;
       const detail = formatOpenAiError(error);
-      logger.error(`[openai] Chat query failed (${detail}):`, error);
-      return { error: `OpenAI request failed - ${detail}` };
+      logger.error(`[openai] Chat query failed on ${model} (${detail}):`, error);
+      if (model === models[models.length - 1]) {
+        return { error: `OpenAI request failed - ${detail}` };
+      }
     }
   }
-  // unreachable but satisfies TS
   return { error: 'OpenAI request failed - empty_response' };
 }
 
