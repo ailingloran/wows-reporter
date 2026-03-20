@@ -50,9 +50,6 @@ export const config = {
   minIndexMessageLength:  parseInt(process.env.MIN_INDEX_MESSAGE_LENGTH || '15', 10),
   minIndexWordCount:      parseInt(process.env.MIN_INDEX_WORD_COUNT     || '4',  10),
 
-  // AI Narrative Drift (gpt-4.1-mini) — set NARRATIVE_AI_ENABLED=true to activate.
-  // Set to false to hide the tab and stop the cron. Delete narrativeAiDb.ts to fully remove.
-  narrativeAiEnabled: process.env.NARRATIVE_AI_ENABLED === 'true',
 };
 
 // ── Keyword Buckets ───────────────────────────────────────────────────────────

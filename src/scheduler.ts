@@ -90,6 +90,10 @@ async function narrativeCallback() {
 // ── AI Narrative Drift (only runs when NARRATIVE_AI_ENABLED=true) ──────────────
 
 async function narrativeAiCallback() {
+  if (getSetting('narrative_ai_enabled', 'false') !== 'true') {
+    logger.debug('[scheduler] AI Narrative drift skipped (disabled via settings)');
+    return;
+  }
   logger.info('[scheduler] AI Narrative drift processing triggered');
   try {
     const { processYesterdayFromMessagesAI } = await import('./store/narrativeAiDb');
@@ -125,13 +129,9 @@ export function registerSchedules(): void {
   // Narrative drift runs at 01:00 CET daily — independent of Community Pulse
   narrativeTask    = cron.schedule(`0 1 * * *`,        narrativeCallback,    { timezone: TZ });
 
-  // AI Narrative Drift runs at 01:30 CET daily — only if NARRATIVE_AI_ENABLED=true
-  // To disable: set NARRATIVE_AI_ENABLED=false in .env and restart.
-  // To remove: delete this block + narrativeAiCallback + narrativeAiDb.ts.
-  if (config.narrativeAiEnabled) {
-    narrativeAiTask = cron.schedule(`30 1 * * *`, narrativeAiCallback, { timezone: TZ });
-    logger.info('[scheduler] AI Narrative Drift scheduled at 01:30 CET (NARRATIVE_AI_ENABLED=true)');
-  }
+  // AI Narrative Drift runs at 01:30 CET daily — skips if narrative_ai_enabled=false in settings.
+  // To remove entirely: delete this line + narrativeAiCallback + narrativeAiDb.ts.
+  narrativeAiTask = cron.schedule(`30 1 * * *`, narrativeAiCallback, { timezone: TZ });
 
   logger.info(
     `[scheduler] Daily at ${dh}:00, Monthly at ${mh}:00 on 1st, ` +

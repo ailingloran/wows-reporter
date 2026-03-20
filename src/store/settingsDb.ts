@@ -29,6 +29,7 @@ const DEFAULTS: Record<string, string> = {
   monthly_channel_id:      config.discordMonthlyChannelId,
   pulse_model:             'gpt-5.1',
   chat_model:              'gpt-5.1',
+  narrative_ai_enabled:    'false',
 };
 
 export function initSettings(): void {
