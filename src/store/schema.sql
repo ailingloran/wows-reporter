@@ -161,6 +161,39 @@ CREATE INDEX IF NOT EXISTS idx_narrative_daily_date
 CREATE INDEX IF NOT EXISTS idx_narrative_keywords_date
   ON narrative_keywords(date DESC);
 
+-- ── AI-powered Narrative Drift (gpt-4.1-mini) ──────────────────────────────────
+-- Separate tables so lexicon and AI results can be compared side-by-side.
+-- Controlled by NARRATIVE_AI_ENABLED=true in .env.
+-- To disable: set NARRATIVE_AI_ENABLED=false.
+-- To remove:  drop these tables + delete src/store/narrativeAiDb.ts.
+
+CREATE TABLE IF NOT EXISTS narrative_ai_daily (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  date           TEXT    NOT NULL,
+  category       TEXT    NOT NULL,
+  pain_count     INTEGER NOT NULL DEFAULT 0,
+  positive_count INTEGER NOT NULL DEFAULT 0,
+  topic_count    INTEGER NOT NULL DEFAULT 0,  -- neutral count
+  sentiment      REAL    NOT NULL DEFAULT 3.0,
+  mood_ref       REAL    NOT NULL DEFAULT 3.0,
+  items_json     TEXT,
+  UNIQUE(date, category)
+);
+
+CREATE TABLE IF NOT EXISTS narrative_ai_keywords (
+  id       INTEGER PRIMARY KEY AUTOINCREMENT,
+  date     TEXT    NOT NULL,
+  keyword  TEXT    NOT NULL,
+  count    INTEGER NOT NULL DEFAULT 1,
+  UNIQUE(date, keyword)
+);
+
+CREATE INDEX IF NOT EXISTS idx_narrative_ai_daily_date
+  ON narrative_ai_daily(date DESC);
+
+CREATE INDEX IF NOT EXISTS idx_narrative_ai_keywords_date
+  ON narrative_ai_keywords(date DESC);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_snapshots_period_taken
   ON snapshots(period, taken_at DESC);

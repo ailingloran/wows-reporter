@@ -39,6 +39,15 @@ import {
   reprocessNarrativeHistory,
 } from '../store/narrativeDb';
 
+// ── AI Narrative Drift (optional — gated by NARRATIVE_AI_ENABLED) ─────────────
+import {
+  getCategoryTrendAI,
+  getEmergingKeywordsAI,
+  getNarrativeDriftAI,
+  getNarrativeHeatmapAI,
+  reprocessNarrativeHistoryAI,
+} from '../store/narrativeAiDb';
+
 const app = express();
 app.use(express.json());
 
@@ -577,6 +586,63 @@ app.post('/api/narrative/reprocess', (_req: Request, res: Response) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// ── AI Narrative Drift routes (only registered when NARRATIVE_AI_ENABLED=true) ─
+
+if (config.narrativeAiEnabled) {
+  app.get('/api/narrative-ai/heatmap', (req: Request, res: Response) => {
+    try {
+      const weeks = Math.min(Math.max(Number(req.query.weeks) || 12, 4), 52);
+      res.json(getNarrativeHeatmapAI(weeks));
+    } catch (error) {
+      logger.error('[dashboard] /api/narrative-ai/heatmap error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/narrative-ai/drift', (_req: Request, res: Response) => {
+    try {
+      res.json(getNarrativeDriftAI());
+    } catch (error) {
+      logger.error('[dashboard] /api/narrative-ai/drift error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/narrative-ai/trend', (req: Request, res: Response) => {
+    try {
+      const category = String(req.query.category ?? '');
+      const days = Math.min(Math.max(Number(req.query.days) || 90, 7), 365);
+      if (!category) { res.status(400).json({ error: 'category required' }); return; }
+      res.json(getCategoryTrendAI(category, days));
+    } catch (error) {
+      logger.error('[dashboard] /api/narrative-ai/trend error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/narrative-ai/keywords', (req: Request, res: Response) => {
+    try {
+      const days = Math.min(Math.max(Number(req.query.days) || 14, 7), 90);
+      res.json(getEmergingKeywordsAI(days));
+    } catch (error) {
+      logger.error('[dashboard] /api/narrative-ai/keywords error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.post('/api/narrative-ai/reprocess', async (_req: Request, res: Response) => {
+    try {
+      const result = await reprocessNarrativeHistoryAI();
+      res.json({ ok: true, ...result });
+    } catch (error) {
+      logger.error('[dashboard] /api/narrative-ai/reprocess error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  logger.info('[dashboard] AI Narrative Drift routes registered (NARRATIVE_AI_ENABLED=true)');
+}
 
 export function startDashboard(): void {
   const server = app.listen(config.dashboardPort, () => {
