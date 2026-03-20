@@ -638,15 +638,13 @@ app.get('/api/narrative-ai/keywords', (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/narrative-ai/reprocess', async (_req: Request, res: Response) => {
+app.post('/api/narrative-ai/reprocess', (_req: Request, res: Response) => {
   if (!aiNarrativeEnabled()) { res.status(503).json({ error: 'AI Narrative Drift is disabled' }); return; }
-  try {
-    const result = await reprocessNarrativeHistoryAI();
-    res.json({ ok: true, ...result });
-  } catch (error) {
-    logger.error('[dashboard] /api/narrative-ai/reprocess error:', error);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+  // Respond immediately — reprocess runs in background (can take several minutes for large history)
+  res.json({ ok: true, background: true });
+  reprocessNarrativeHistoryAI().catch(err =>
+    logger.error('[dashboard] /api/narrative-ai/reprocess background error:', err),
+  );
 });
 
 export function startDashboard(): void {
