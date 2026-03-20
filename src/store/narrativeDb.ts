@@ -237,6 +237,14 @@ const STOPWORDS = new Set([
   // Other generics caught in review
   'everything', 'nothing', 'something', 'anything',
   'shoots', 'builds', 'stats', 'chance', 'reload',
+  // Caught from AI comparison — generic words leaking through as emerging keywords
+  'skill', 'skills', 'class', 'shells', 'shell', 'stupid', 'sleep',
+  'sense', 'potential', 'decent', 'target', 'watch', 'light',
+  'island', 'account', 'captain', 'experience', 'minutes',
+  'shooting', 'spotting', 'gameplay', 'missions', 'mission',
+  'british', 'american', 'fucking', 'myself', 'under',
+  'broadside', 'turret', 'angle', 'italian', 'german', 'french',
+  'russian', 'japanese', 'dutch', 'spanish', 'polish', 'swedish',
 ]);
 
 // Flat set of all category keywords for emerging keyword detection
@@ -677,4 +685,73 @@ export function getEmergingKeywords(days = 14): EmergingKeyword[] {
       // Thresholds scaled for raw message volumes
       heat: (r.total >= 50 ? 'hot' : r.total >= 25 ? 'warm' : 'cool') as 'hot' | 'warm' | 'cool',
     }));
+}
+
+// ── AI-informed keyword suggestions ────────────────────────────────────────────
+// Compares lexicon emerging keywords with AI emerging keywords to identify:
+//   - Topics the AI confirmed are real (both sources agree)
+//   - Topics the AI spotted that the lexicon missed (add to categories?)
+//   - Lexicon keywords the AI ignored (likely noise → add to stopwords?)
+//
+// Failsafe: if AI is disabled or has no data, returns empty suggestion lists.
+// The lexicon continues to work normally regardless.
+
+export interface NarrativeSuggestions {
+  hasAiData:       boolean;
+  confirmedByAi:   { keyword: string; lexiconCount: number; aiCount: number }[];
+  missedByLexicon: { keyword: string; aiCount: number }[];
+  noiseCandidates: { keyword: string; lexiconCount: number }[];
+}
+
+export function getAiSuggestedImprovements(days = 30): NarrativeSuggestions {
+  const db    = getDb();
+  const since = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+
+  type KwRow = { keyword: string; total: number };
+
+  const lexiconKws = db.prepare(`
+    SELECT keyword, SUM(count) AS total FROM narrative_keywords
+    WHERE date >= ? GROUP BY keyword ORDER BY total DESC LIMIT 150
+  `).all(since) as KwRow[];
+
+  // AI data is optional — gracefully absent when AI is disabled or not yet run
+  let aiKws: KwRow[] = [];
+  let hasAiData = false;
+  try {
+    const rows = db.prepare(`
+      SELECT keyword, SUM(count) AS total FROM narrative_ai_keywords
+      WHERE date >= ? GROUP BY keyword ORDER BY total DESC LIMIT 150
+    `).all(since) as KwRow[];
+    if (rows.length > 0) { aiKws = rows; hasAiData = true; }
+  } catch { /* AI tables absent — not an error */ }
+
+  if (!hasAiData) {
+    return { hasAiData: false, confirmedByAi: [], missedByLexicon: [], noiseCandidates: [] };
+  }
+
+  const lexiconMap = new Map(lexiconKws.map(k => [k.keyword, k.total]));
+  const aiMap      = new Map(aiKws.map(k => [k.keyword, k.total]));
+
+  // Both sources agree — genuine community topics
+  const confirmedByAi = lexiconKws
+    .filter(k => aiMap.has(k.keyword))
+    .map(k => ({ keyword: k.keyword, lexiconCount: k.total, aiCount: aiMap.get(k.keyword)! }))
+    .sort((a, b) => b.aiCount - a.aiCount)
+    .slice(0, 20);
+
+  // AI spotted these but the lexicon didn't — possible category keyword additions
+  const missedByLexicon = aiKws
+    .filter(k => !lexiconMap.has(k.keyword) && k.total >= 5)
+    .map(k => ({ keyword: k.keyword, aiCount: k.total }))
+    .sort((a, b) => b.aiCount - a.aiCount)
+    .slice(0, 20);
+
+  // Lexicon flagged these but AI didn't agree — likely noise / stopword candidates
+  const noiseCandidates = lexiconKws
+    .filter(k => !aiMap.has(k.keyword) && k.total >= 15)
+    .map(k => ({ keyword: k.keyword, lexiconCount: k.total }))
+    .sort((a, b) => b.lexiconCount - a.lexiconCount)
+    .slice(0, 20);
+
+  return { hasAiData, confirmedByAi, missedByLexicon, noiseCandidates };
 }

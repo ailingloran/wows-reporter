@@ -37,6 +37,7 @@ import {
   getNarrativeDrift,
   getNarrativeHeatmap,
   reprocessNarrativeHistory,
+  getAiSuggestedImprovements,
 } from '../store/narrativeDb';
 
 // ── AI Narrative Drift (optional — gated by NARRATIVE_AI_ENABLED) ─────────────
@@ -573,6 +574,15 @@ app.get('/api/narrative/keywords', (req: Request, res: Response) => {
     res.json(getEmergingKeywords(days));
   } catch (error) {
     logger.error('[dashboard] /api/narrative/keywords error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/narrative/suggestions', (_req: Request, res: Response) => {
+  try {
+    res.json(getAiSuggestedImprovements());
+  } catch (error) {
+    logger.error('[dashboard] /api/narrative/suggestions error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

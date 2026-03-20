@@ -100,7 +100,7 @@ If a category has no relevant messages, set sentiment to 3.0 and volume/pain_cou
 
 // ── Limits ─────────────────────────────────────────────────────────────────────
 
-const MAX_MESSAGES_PER_DAY = 800;
+const MAX_MESSAGES_PER_DAY = 5_000;
 const MAX_MSG_CHARS        = 200;
 
 // ── Core daily processing ──────────────────────────────────────────────────────
