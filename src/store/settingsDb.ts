@@ -27,6 +27,8 @@ const DEFAULTS: Record<string, string> = {
   min_index_messages:      '500',
   staff_channel_id:        config.discordStaffChannelId,
   monthly_channel_id:      config.discordMonthlyChannelId,
+  pulse_model:             'gpt-5.1',
+  chat_model:              'gpt-5.1',
 };
 
 export function initSettings(): void {

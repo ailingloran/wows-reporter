@@ -6,6 +6,7 @@
 import OpenAI from 'openai';
 import { config } from '../config';
 import { logger } from '../logger';
+import { getSetting } from '../store/settingsDb';
 
 export interface PulseItem {
   text:                string;
@@ -241,7 +242,8 @@ export async function answerQuestion(
     content: `Here are ${analysed} Discord messages:\n\n${messageBlock}\n\nQuestion: ${question}`,
   });
 
-  const models = ['gpt-5.1', 'gpt-4o'];
+  const primaryModel = getSetting('chat_model', 'gpt-5.1');
+  const models = primaryModel === 'gpt-4o' ? ['gpt-4o'] : [primaryModel, 'gpt-4o'];
   for (const model of models) {
     try {
       const response = await getClient().chat.completions.create({
@@ -256,7 +258,7 @@ export async function answerQuestion(
         continue;
       }
 
-      if (model !== 'gpt-5.1') logger.info(`[openai] Chat answered via fallback model ${model}.`);
+      if (model !== primaryModel) logger.info(`[openai] Chat answered via fallback model ${model}.`);
       logger.info(`[openai] Chat answered. Collected: ${collected}, analysed: ${analysed}`);
       return { answer, collected, analysed };
     } catch (error) {
@@ -281,8 +283,9 @@ export async function analyseCommunityPulse(messages: string[]): Promise<PulseRe
   const usedMessages = messages.length;
 
   try {
+    const pulseModel = getSetting('pulse_model', 'gpt-5.1');
     const response = await getClient().chat.completions.create({
-      model: 'gpt-5.1',
+      model: pulseModel,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
