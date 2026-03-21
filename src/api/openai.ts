@@ -328,3 +328,77 @@ export async function analyseCommunityPulse(messages: string[]): Promise<PulseRe
     return null;
   }
 }
+
+// ── Weekly Pulse Summary ───────────────────────────────────────────────────────
+
+export interface WeeklyTopicItem {
+  rank:           number;
+  topic:          string;
+  summary:        string;
+  days_mentioned: number;
+  recurring:      boolean;
+}
+
+export interface WeeklyPulseResult {
+  top_topics: WeeklyTopicItem[];
+  week_mood:  string;
+  trending:   string;
+}
+
+const WEEKLY_SYSTEM_PROMPT = `You are a community analyst for a World of Warships gaming Discord server, summarising a week of daily community pulse reports.
+World of Warships is a naval MMO — topics include ships, game modes, balance, economy, carriers, submarines, and community events.`;
+
+/**
+ * Synthesises N daily Community Pulse summaries into a ranked weekly overview.
+ * One AI call per week — uses the already-saved PulseResult JSON from the DB,
+ * so no raw messages are re-read or re-billed.
+ */
+export async function getWeeklySummary(
+  digest: string,
+  dayCount: number,
+): Promise<WeeklyPulseResult | null> {
+  if (!config.openAiApiKey) {
+    logger.warn('[openai] OPENAI_API_KEY not set — skipping weekly summary');
+    return null;
+  }
+
+  const pulseModel = getSetting('pulse_model', 'gpt-5.1');
+
+  const userPrompt =
+    `Here are ${dayCount} daily Community Pulse reports for the past week:\n\n${digest}\n\n` +
+    `Produce a ranked weekly summary. Return a JSON object with:\n` +
+    `- "top_topics": array of 5–6 objects, each:\n` +
+    `  - "rank": integer (1 = most important)\n` +
+    `  - "topic": 2–5 word theme name (e.g. "Carrier Spotting Mechanics")\n` +
+    `  - "summary": 1–2 sentences on what players said and why it mattered\n` +
+    `  - "days_mentioned": integer — how many of the ${dayCount} days this theme appeared\n` +
+    `  - "recurring": boolean — true if appeared on 3 or more days\n` +
+    `- "week_mood": one sentence describing the overall community mood for the week\n` +
+    `- "trending": what spiked or was unusually prominent this week\n\n` +
+    `Ranking priority: 1) days mentioned, 2) pain points > neutral topics > positives, 3) player count. ` +
+    `Merge similar themes from different days into one item. Respond with valid JSON only.`;
+
+  try {
+    const response = await getClient().chat.completions.create({
+      model: pulseModel,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: WEEKLY_SYSTEM_PROMPT },
+        { role: 'user',   content: userPrompt },
+      ],
+      max_completion_tokens: 2000,
+    });
+
+    const raw = response.choices[0]?.message?.content;
+    if (!raw) throw new Error('Empty response from OpenAI');
+
+    const parsed = JSON.parse(raw) as WeeklyPulseResult;
+    if (!Array.isArray(parsed.top_topics)) throw new Error('Unexpected JSON shape');
+
+    logger.info(`[openai] Weekly summary complete. Topics: ${parsed.top_topics.length}`);
+    return parsed;
+  } catch (err) {
+    logger.error('[openai] getWeeklySummary failed:', err);
+    return null;
+  }
+}

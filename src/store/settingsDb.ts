@@ -30,6 +30,7 @@ const DEFAULTS: Record<string, string> = {
   pulse_model:             'gpt-5.1',
   chat_model:              'gpt-5.1',
   narrative_ai_enabled:    'false',
+  weekly_pulse_enabled:    'true',
 };
 
 export function initSettings(): void {

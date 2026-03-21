@@ -16,12 +16,13 @@ const TZ = 'Europe/Berlin';
 
 // ── Task references (kept so they can be stopped on reschedule) ───────────────
 
-let dailyTask:        cron.ScheduledTask | null = null;
-let monthlyTask:      cron.ScheduledTask | null = null;
-let sentimentTask:    cron.ScheduledTask | null = null;
+let dailyTask:         cron.ScheduledTask | null = null;
+let monthlyTask:       cron.ScheduledTask | null = null;
+let sentimentTask:     cron.ScheduledTask | null = null;
+let weeklyPulseTask:   cron.ScheduledTask | null = null;
 let staffSnapshotTask: cron.ScheduledTask | null = null;
-let narrativeTask:    cron.ScheduledTask | null = null;
-let narrativeAiTask:  cron.ScheduledTask | null = null;
+let narrativeTask:     cron.ScheduledTask | null = null;
+let narrativeAiTask:   cron.ScheduledTask | null = null;
 
 // ── Callbacks (named so they can be reused when rescheduling) ─────────────────
 
@@ -104,6 +105,21 @@ async function narrativeAiCallback() {
   }
 }
 
+async function weeklyPulseCallback() {
+  if (getSetting('weekly_pulse_enabled', 'true') !== 'true') {
+    logger.info('[scheduler] Weekly Pulse Summary skipped (disabled via settings)');
+    return;
+  }
+  logger.info('[scheduler] Weekly Pulse Summary triggered');
+  try {
+    const { runWeeklyPulseSummary } = await import('./reports/weeklyPulse');
+    await runWeeklyPulseSummary();
+    logger.info('[scheduler] Weekly Pulse Summary complete');
+  } catch (err) {
+    logger.error('[scheduler] Weekly Pulse Summary failed:', err);
+  }
+}
+
 async function staffSnapshotCallback() {
   logger.info('[scheduler] Staff weekly snapshot triggered');
   try {
@@ -125,7 +141,9 @@ export function registerSchedules(): void {
   dailyTask        = cron.schedule(`0 ${dh} * * *`,   dailyCallback,        { timezone: TZ });
   monthlyTask      = cron.schedule(`0 ${mh} 1 * *`,   monthlyCallback,      { timezone: TZ });
   sentimentTask    = cron.schedule(`0 ${sh} * * *`,   sentimentCallback,    { timezone: TZ });
-  staffSnapshotTask = cron.schedule(`0 0 * * 1`,       staffSnapshotCallback, { timezone: TZ });
+  // Weekly Pulse Summary — every Monday at 12:00 CET, summarises the past 7 daily pulses
+  weeklyPulseTask  = cron.schedule(`0 12 * * 1`,      weeklyPulseCallback,  { timezone: TZ });
+  staffSnapshotTask = cron.schedule(`0 0 * * 1`,      staffSnapshotCallback, { timezone: TZ });
   // Narrative drift runs at 01:00 CET daily — independent of Community Pulse
   narrativeTask    = cron.schedule(`0 1 * * *`,        narrativeCallback,    { timezone: TZ });
 
