@@ -336,7 +336,7 @@ export interface WeeklyTopicItem {
   topic:          string;
   summary:        string;
   days_mentioned: number;
-  recurring:      boolean;
+  sentiment:      'positive' | 'mixed' | 'negative';
 }
 
 export interface WeeklyPulseResult {
@@ -372,7 +372,7 @@ export async function getWeeklySummary(
     `  - "topic": 2–5 word theme name (e.g. "Carrier Spotting Mechanics")\n` +
     `  - "summary": 1–2 sentences on what players said and why it mattered\n` +
     `  - "days_mentioned": integer — how many of the ${dayCount} days this theme appeared\n` +
-    `  - "recurring": boolean — true if appeared on 3 or more days\n` +
+    `  - "sentiment": one of "positive", "mixed", or "negative" — overall player sentiment toward this topic across the week\n` +
     `- "week_mood": one sentence describing the overall community mood for the week\n` +
     `- "trending": what spiked or was unusually prominent this week\n\n` +
     `Ranking priority: 1) days mentioned, 2) pain points > neutral topics > positives, 3) player count. ` +
