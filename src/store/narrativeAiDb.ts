@@ -50,21 +50,23 @@ interface AiDayResult {
 // ── System prompt ──────────────────────────────────────────────────────────────
 
 const CATEGORY_DESCRIPTIONS: Record<string, string> = {
-  economy:     'Economy & Grind — credits, doubloons, coal, steel, grind, pay to win, premium ships, containers, bundles, directives',
-  balance:     'Balance — overpowered ships, nerf/buff, fire/flooding, secondaries, concealment, overmatch, cruisers, destroyers, battleships',
-  matchmaking: 'Matchmaking — tier spread, uptiered, queue balance, one-sided teams, SBMM, seal clubbing, divisions',
-  carriers:    'Carriers — CVs, aircraft, rocket planes, bombers, torpedo bombers, aviation spotting',
-  submarines:  'Submarines — ASW, depth charges, pinging, sonar, homing torpedoes, hydrophone',
-  new_content: 'New Ships & Content — tech tree, premium ships, early access, super ships, patches, reworks',
-  performance: 'Client & Performance — FPS, lag, ping, crashes, bugs, disconnects, desync',
-  trust:       'Trust & Communication — Wargaming comms, devs, roadmap, transparency, promises, dev blog',
-  game_modes:  'Game Modes — ranked, clan battles, co-op, operations, brawl, random battles, convoy',
-  moderation:  'Toxicity & Community — toxic behaviour, chat bans, report system, team killing, griefing',
+  economy:      'Economy — credits, coal, steel, free XP, gold, grind, earn/reward, directives, campaigns, supercontainers',
+  monetisation: 'Monetisation — pay to win, doubloons, premium store, premium time, loot boxes, bundles, gambling mechanics, wishing wharf, gacha',
+  balance:      'Balance — overpowered/underpowered ships, nerf/buff, meta, fire/flooding, concealment, overmatch, power creep',
+  matchmaking:  'Matchmaking — tier spread, uptiered, stomps, steamrolls, queue balance, one-sided teams, SBMM, seal clubbing',
+  carriers:     'Carriers — CVs, aircraft, rocket planes, bombers, torpedo bombers, plane spotting',
+  submarines:   'Submarines — ASW, depth charges, pinging, sonar, homing torpedoes, hydrophone, shotgunning',
+  new_content:  'New Ships & Content — tech tree, early access, super ships, devblog, ST/PT, patches, reworks',
+  performance:  'Client & Performance — FPS, lag, ping, crashes, bugs, disconnects, desync, login issues',
+  trust:        'Trust & Communication — developer communication, roadmap, transparency, promises, dev blog',
+  pvp_modes:    'PvP Game Modes — ranked, clan battles, brawl, random battles, arms race, convoy, sprint',
+  pve_modes:    'PvE Game Modes — co-op, operations, scenarios, asymmetric battles, event modes',
+  moderation:   'Toxicity & Community — toxic behaviour, chat bans, report system, team killing, griefing, karma',
 };
 
 const SYSTEM_PROMPT = `You are analysing raw Discord messages from a World of Warships community server.
 
-Your task: for each of the 10 topic categories below, read the provided messages and produce:
+Your task: for each of the 12 topic categories below, read the provided messages and produce:
 - sentiment: 1 (very negative) to 5 (very positive), 3 = neutral. Reflect the actual tone — don't average towards 3 if messages are clearly negative or positive.
 - volume: count of messages that meaningfully discuss this category (not just a passing mention)
 - pain_count: messages expressing clear frustration, complaints, or criticism about this category
@@ -79,16 +81,18 @@ Also identify up to 8 topics or words being discussed that don't fit any of the 
 Respond with valid JSON only — no commentary, no markdown:
 {
   "categories": {
-    "economy":     { "sentiment": 2.8, "volume": 34, "pain_count": 12, "positive_count": 3, "keywords": ["grind", "credits", "coal", "premium", "doubloon"] },
-    "balance":     { "sentiment": 3.1, "volume": 58, "pain_count": 14, "positive_count": 10, "keywords": ["nerf", "overmatch", "HE spam", "fire", "concealment"] },
-    "matchmaking": { ... },
-    "carriers":    { ... },
-    "submarines":  { ... },
-    "new_content": { ... },
-    "performance": { ... },
-    "trust":       { ... },
-    "game_modes":  { ... },
-    "moderation":  { ... }
+    "economy":      { "sentiment": 2.8, "volume": 34, "pain_count": 12, "positive_count": 3, "keywords": ["grind", "credits", "coal", "gold", "steel"] },
+    "monetisation": { "sentiment": 1.9, "volume": 28, "pain_count": 22, "positive_count": 1, "keywords": ["loot box", "doubloons", "p2w", "bundle", "gacha"] },
+    "balance":      { "sentiment": 3.1, "volume": 58, "pain_count": 14, "positive_count": 10, "keywords": ["nerf", "overmatch", "HE spam", "fire", "concealment"] },
+    "matchmaking":  { ... },
+    "carriers":     { ... },
+    "submarines":   { ... },
+    "new_content":  { ... },
+    "performance":  { ... },
+    "trust":        { ... },
+    "pvp_modes":    { ... },
+    "pve_modes":    { ... },
+    "moderation":   { ... }
   },
   "emerging_topics": [
     { "keyword": "Yamato", "count": 23 },

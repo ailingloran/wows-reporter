@@ -20,21 +20,30 @@ import { logger } from '../logger';
 
 export const CATEGORIES: Record<string, { label: string; keywords: string[] }> = {
   economy: {
-    label: 'Economy & Grind',
+    label: 'Economy',
     keywords: [
-      'credit', 'doubloon', 'free xp', 'coal', 'steel', 'grind', 'pay to win', 'p2w',
-      'premium', 'crate', 'container', 'research bureau', 'dockyard',
-      'cost', 'price', 'loot box', 'resource', 'earn', 'reward',
+      'credit', 'free xp', 'coal', 'steel', 'grind', 'gold',
+      'cost', 'price', 'resource', 'earn', 'reward',
       'silver', 'snowflake', 'directive', 'campaign', 'combat mission',
-      'bundle', 'token', 'trade-in', 'admiral bundle', 'supercontainer',
+      'token', 'trade-in', 'supercontainer', 'research bureau',
+    ],
+  },
+  monetisation: {
+    label: 'Monetisation',
+    keywords: [
+      'pay to win', 'p2w', 'premium ship', 'premium store', 'premium time',
+      'doubloons', 'crate', 'container', 'loot box', 'dockyard',
+      'bundle', 'admiral bundle', 'naked bundle', 'ultimate bundle',
+      'steel will', 'salvage for victory', ' sfv ',
+      'wargambling', 'gambling', 'wishing wharf', 'gamba', 'gacha',
     ],
   },
   balance: {
     label: 'Balance',
     keywords: [
-      'overpowered', ' op ', 'broken', 'nerf', 'buff', 'meta', 'he spam', 'fire chance',
+      'overpowered', ' op ', 'underpowered', 'weak', 'undertuned', 'underperform',
+      'broken', 'nerf', 'buff', 'meta', 'he spam', 'fire chance',
       'flooding', 'unbalanced', 'overtuned', 'balance', 'powercreep', 'power creep',
-      'cruiser', 'cruisers', 'destroyer', 'destroyers', 'battleship', 'battleships',
       'armor', 'armour', 'concealment', 'dispersion', 'accuracy', 'sigma',
       'overmatch', 'ricochet', 'smoke', 'secondaries', 'secondary',
     ],
@@ -45,32 +54,34 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
       'matchmaking', 'matchmaker', 'uptiered', 'tier spread', ' mm ', 'sbmm',
       'queue time', 'team balance', 'divisions', 'one-sided', 'uneven teams',
       'seal clubbing', 'bottom tier', 'top tier', 'decompression', 'uptier',
+      'stomp', 'stomps', 'steamroll', 'steamrolls', 'blowout', 'dump', 'mirroring',
     ],
   },
   carriers: {
     label: 'Carriers',
     keywords: [
       'carrier', 'aerial', 'airstrike', 'rocket plane', 'attack aircraft',
-      'spotting plane', ' cv ', ' cvs ', 'aviation',
+      'plane spotting', ' cv ', ' cvs ', 'aviation',
       'aircraft', 'bomber', 'torpedo bomber', 'fighter plane',
-      ' plane ', 'planes', 'radar', 'hydro',
+      ' plane ', 'planes',
     ],
   },
   submarines: {
     label: 'Submarines',
     keywords: [
-      'submarine', ' sub ', ' subs ', 'depth charge', 'torpedo soup',
+      'submarine', ' sub ', ' subs ', ' ss ', 'depth charge', 'torpedo soup',
       'ping', 'pinging', 'homing torpedo', 'acoustic', 'submerged',
-      'asw', 'anti-submarine', 'hydrophone', 'sonar', 'patrolling',
-      'torps', 'torpedo', 'torpedoes',
+      'asw', 'anti-submarine', 'hydrophone', 'sonar',
+      'shotgunning', 'shotgun',
     ],
   },
   new_content: {
     label: 'New Ships & Content',
     keywords: [
-      'tech tree', 'premium ship', 'early access', 'paper ship', 'coal ship',
+      'tech tree', 'early access', 'paper ship', 'coal ship',
       'steel ship', 'super ship', 'new ship', 'announced', 'coming soon',
-      'update ', 'patch ', 'new release', 'test ship', 'new line', 'rework',
+      'update ', 'new update', 'patch ', 'new release', 'test ship', 'new line', 'rework',
+      'devblog', 'devblog announcement', ' st ', ' pt ',
     ],
   },
   performance: {
@@ -79,23 +90,31 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
       'fps', 'lag', ' ping', 'crash', ' bug ', 'bugged', 'patch broke',
       'launcher', 'performance', 'stutter', 'disconnect', 'freeze', 'broken client',
       'server issue', 'desync',
+      'login', 'log in', 'logging in', "can't connect", 'connection refused',
+      'server down', 'maintenance',
     ],
   },
   trust: {
     label: 'Trust & Communication',
     keywords: [
-      'no communication', 'wargaming', ' wg ', 'ignor', 'tone deaf', 'transparency',
+      'no communication', 'ignor', 'tone deaf', 'transparency',
       'roadmap', 'abandon', 'lied', 'promis', 'listen to player', 'player feedback',
       'community feedback', 'no response', 'silence', 'mislead', 'dev blog', 'devs',
     ],
   },
-  game_modes: {
-    label: 'Game Modes',
+  pvp_modes: {
+    label: 'PvP Game Modes',
     keywords: [
-      'ranked', 'clan battles', 'co-op', 'operations', 'operation',
-      'scenario', 'brawl', 'arms race', 'asymmetric', 'removed mode',
-      'bring back', 'missing mode', 'game mode', 'sprint', 'randoms',
-      'random battles', 'convoy', 'training room', 'public test',
+      'ranked', 'clan battles', 'brawl', 'arms race', 'sprint',
+      'randoms', 'random battles', 'convoy',
+      'removed mode', 'bring back', 'missing mode', 'game mode',
+    ],
+  },
+  pve_modes: {
+    label: 'PvE Game Modes',
+    keywords: [
+      'co-op', 'coop', 'operations', 'operation', 'scenario',
+      'asymmetric', 'asymmetrics', 'event mode',
     ],
   },
   moderation: {
@@ -103,6 +122,7 @@ export const CATEGORIES: Record<string, { label: string; keywords: string[] }> =
     keywords: [
       'toxic', 'chat ban', 'report system', 'teamkill', ' afk ', 'seal clubbing',
       'harassment', 'cheating', 'bot player', 'griefing', 'unsportsmanlike', 'flame',
+      'karma',
     ],
   },
 };
