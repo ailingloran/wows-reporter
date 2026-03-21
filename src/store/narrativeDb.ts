@@ -511,13 +511,14 @@ export function getNarrativeHeatmap(weeks = 12): HeatmapResponse {
 // ── Drift alerts ───────────────────────────────────────────────────────────────
 
 export interface DriftAlert {
-  level: 'danger' | 'warning' | 'emerging';
-  category: string;
-  label: string;
-  detail: string;
+  level:            'danger' | 'warning' | 'emerging';
+  tier?:            1 | 2;   // 1 = immediate (24h vs 14d baseline), 2 = confirmed (3d vs 14d baseline)
+  category:         string;
+  label:            string;
+  detail:           string;
   currentSentiment?: number;
-  priorSentiment?: number;
-  volumeChange?: number;
+  priorSentiment?:   number;
+  volumeChange?:     number;
 }
 
 export interface DriftResponse {
@@ -527,67 +528,99 @@ export interface DriftResponse {
 }
 
 export function getNarrativeDrift(): DriftResponse {
-  const db = getDb();
-  const now  = new Date();
+  const db  = getDb();
+  const now = new Date();
   const day0  = now.toISOString().slice(0, 10);
+  const day1  = new Date(now.getTime() -  1 * 86_400_000).toISOString().slice(0, 10);
+  const day3  = new Date(now.getTime() -  3 * 86_400_000).toISOString().slice(0, 10);
   const day7  = new Date(now.getTime() -  7 * 86_400_000).toISOString().slice(0, 10);
   const day14 = new Date(now.getTime() - 14 * 86_400_000).toISOString().slice(0, 10);
+  const day15 = new Date(now.getTime() - 15 * 86_400_000).toISOString().slice(0, 10);
+  const day17 = new Date(now.getTime() - 17 * 86_400_000).toISOString().slice(0, 10);
 
   type AggRow = { category: string; avg_sentiment: number; total_items: number };
 
-  const currentWeek = db.prepare(`
+  const query = db.prepare(`
     SELECT category, AVG(sentiment) AS avg_sentiment,
            SUM(pain_count + positive_count + topic_count) AS total_items
     FROM narrative_daily WHERE date > ? AND date <= ? GROUP BY category
-  `).all(day7, day0) as AggRow[];
+  `);
 
-  const priorWeek = db.prepare(`
-    SELECT category, AVG(sentiment) AS avg_sentiment,
-           SUM(pain_count + positive_count + topic_count) AS total_items
-    FROM narrative_daily WHERE date > ? AND date <= ? GROUP BY category
-  `).all(day14, day7) as AggRow[];
+  // Tier 1: yesterday vs 14-day baseline (non-overlapping)
+  const t1Signal   = query.all(day1, day0) as AggRow[];
+  const t1Baseline = query.all(day15, day1) as AggRow[];
+  const t1BaseMap  = new Map(t1Baseline.map(r => [r.category, r]));
 
-  const priorMap = new Map(priorWeek.map(r => [r.category, r]));
+  // Tier 2: last 3 days vs 14-day baseline (non-overlapping)
+  const t2Signal   = query.all(day3, day0) as AggRow[];
+  const t2Baseline = query.all(day17, day3) as AggRow[];
+  const t2BaseMap  = new Map(t2Baseline.map(r => [r.category, r]));
+
   const alerts: DriftAlert[] = [];
 
-  for (const curr of currentWeek) {
-    const prior = priorMap.get(curr.category);
+  // ── Tier 1: immediate signal (yesterday vs 14d baseline) ─────────────────
+  for (const curr of t1Signal) {
+    const base  = t1BaseMap.get(curr.category);
     const label = CATEGORIES[curr.category]?.label ?? curr.category;
+    if (!base) continue;
 
-    if (prior) {
-      const sentDrop  = curr.avg_sentiment - prior.avg_sentiment;
-      const volChange = prior.total_items > 0
-        ? (curr.total_items - prior.total_items) / prior.total_items
-        : 0;
+    const sentDrop   = curr.avg_sentiment - base.avg_sentiment;
+    const signalRate = curr.total_items;           // 1 day
+    const baseRate   = base.total_items / 14;      // daily avg over baseline
+    const volChange  = baseRate > 0 ? (signalRate - baseRate) / baseRate : 0;
+    const hasData    = curr.total_items >= 20 && base.total_items >= 80;
 
-      // Scaled thresholds for raw message volumes (~10× more items than pulse-based)
-      const bothHaveData = curr.total_items >= 80 && prior.total_items >= 150;
-
-      if (sentDrop <= -0.3 && bothHaveData) {
-        alerts.push({
-          level: 'danger',
-          category: curr.category,
-          label,
-          detail: `Sentiment ${prior.avg_sentiment.toFixed(2)} → ${curr.avg_sentiment.toFixed(2)} · vol ${volChange >= 0 ? '+' : ''}${(volChange * 100).toFixed(0)}%`,
-          currentSentiment: Math.round(curr.avg_sentiment * 100) / 100,
-          priorSentiment:   Math.round(prior.avg_sentiment * 100) / 100,
-          volumeChange:     Math.round(volChange * 100) / 100,
-        });
-      } else if (volChange >= 0.5 && bothHaveData) {
-        alerts.push({
-          level: 'warning',
-          category: curr.category,
-          label,
-          detail: `Volume up ${(volChange * 100).toFixed(0)}% WoW (${curr.total_items} vs ${prior.total_items} messages)`,
-          currentSentiment: Math.round(curr.avg_sentiment * 100) / 100,
-          priorSentiment:   Math.round(prior.avg_sentiment * 100) / 100,
-          volumeChange:     Math.round(volChange * 100) / 100,
-        });
-      }
+    if (sentDrop <= -0.4 && hasData) {
+      alerts.push({
+        tier: 1, level: 'danger', category: curr.category, label,
+        detail: `Yesterday ${curr.avg_sentiment.toFixed(2)} vs 14d avg ${base.avg_sentiment.toFixed(2)}`,
+        currentSentiment: Math.round(curr.avg_sentiment * 100) / 100,
+        priorSentiment:   Math.round(base.avg_sentiment * 100) / 100,
+        volumeChange:     Math.round(volChange * 100) / 100,
+      });
+    } else if (volChange >= 0.8 && hasData) {
+      alerts.push({
+        tier: 1, level: 'warning', category: curr.category, label,
+        detail: `Yesterday ${curr.total_items} msgs vs 14d daily avg ${baseRate.toFixed(0)} (+${(volChange * 100).toFixed(0)}%)`,
+        currentSentiment: Math.round(curr.avg_sentiment * 100) / 100,
+        priorSentiment:   Math.round(base.avg_sentiment * 100) / 100,
+        volumeChange:     Math.round(volChange * 100) / 100,
+      });
     }
   }
 
-  // Emerging keywords: appeared more this week vs last
+  // ── Tier 2: confirmed shift (3-day avg vs 14d baseline) ──────────────────
+  for (const curr of t2Signal) {
+    const base  = t2BaseMap.get(curr.category);
+    const label = CATEGORIES[curr.category]?.label ?? curr.category;
+    if (!base) continue;
+
+    const sentDrop   = curr.avg_sentiment - base.avg_sentiment;
+    const signalRate = curr.total_items / 3;       // daily avg over 3 days
+    const baseRate   = base.total_items / 14;      // daily avg over baseline
+    const volChange  = baseRate > 0 ? (signalRate - baseRate) / baseRate : 0;
+    const hasData    = curr.total_items >= 50 && base.total_items >= 100;
+
+    if (sentDrop <= -0.3 && hasData) {
+      alerts.push({
+        tier: 2, level: 'danger', category: curr.category, label,
+        detail: `3d avg ${curr.avg_sentiment.toFixed(2)} vs 14d baseline ${base.avg_sentiment.toFixed(2)}`,
+        currentSentiment: Math.round(curr.avg_sentiment * 100) / 100,
+        priorSentiment:   Math.round(base.avg_sentiment * 100) / 100,
+        volumeChange:     Math.round(volChange * 100) / 100,
+      });
+    } else if (volChange >= 0.5 && hasData) {
+      alerts.push({
+        tier: 2, level: 'warning', category: curr.category, label,
+        detail: `3d daily avg ${signalRate.toFixed(0)} msgs vs 14d baseline ${baseRate.toFixed(0)} (+${(volChange * 100).toFixed(0)}%)`,
+        currentSentiment: Math.round(curr.avg_sentiment * 100) / 100,
+        priorSentiment:   Math.round(base.avg_sentiment * 100) / 100,
+        volumeChange:     Math.round(volChange * 100) / 100,
+      });
+    }
+  }
+
+  // ── Emerging keywords (last 7 days vs prior 7) ───────────────────────────
   type KwRow = { keyword: string; total: number };
   const emergingKw = db.prepare(`
     SELECT keyword, SUM(count) AS total FROM narrative_keywords
@@ -604,17 +637,20 @@ export function getNarrativeDrift(): DriftResponse {
     const priorCount = priorKwMap.get(kw.keyword) ?? 0;
     if (kw.total > priorCount * 3) {
       alerts.push({
-        level: 'emerging',
-        category: 'emerging',
+        level: 'emerging', category: 'emerging',
         label: `"${kw.keyword}"`,
         detail: `${kw.total} mentions this week (${priorCount} last week) — not in any tracked category`,
       });
     }
   }
 
+  // Sort: tier 1 → tier 2 → no tier; within tier: danger → warning → emerging
+  const levelP = { danger: 0, warning: 1, emerging: 2 } as const;
   alerts.sort((a, b) => {
-    const p = { danger: 0, warning: 1, emerging: 2 } as const;
-    return p[a.level] - p[b.level];
+    const ta = a.tier ?? 3;
+    const tb = b.tier ?? 3;
+    if (ta !== tb) return ta - tb;
+    return levelP[a.level] - levelP[b.level];
   });
 
   const categoryMeta: Record<string, { label: string }> = {};
