@@ -26,7 +26,12 @@ const DEFAULTS: Record<string, string> = {
   pulse_model:             'gpt-5.1',
   chat_model:              'gpt-5.1',
   narrative_ai_enabled:    'false',
-  weekly_pulse_enabled:    'true',
+  weekly_pulse_enabled:         'true',
+  spike_alert_enabled:          'true',
+  spike_alert_threshold:        '8',
+  spike_alert_window_minutes:   '10',
+  spike_alert_cooldown_minutes: '45',
+  spike_alert_min_users:        '5',
 };
 
 export function initSettings(): void {

@@ -15,6 +15,7 @@ import { runMonthlyReport } from './reports/monthly';
 import { startDashboard } from './dashboard/server';
 import { startMessageIndexer, backfillMessages } from './indexer/messageIndexer';
 import { startStaffTracker } from './staffTracker';
+import { startSpikeDetector, refreshSpikeChannels } from './alerts/spikeDetector';
 import { config } from './config';
 import { logger } from './logger';
 
@@ -93,6 +94,9 @@ async function main() {
 
   // 6. Start staff activity tracker (full-server coverage)
   startStaffTracker();
+
+  // 7. Start real-time outage spike detector
+  startSpikeDetector();
 
   logger.info('=== WoWS Reporter running. Waiting for scheduled events. ===');
 }

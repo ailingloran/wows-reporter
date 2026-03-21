@@ -367,6 +367,9 @@ app.post('/api/settings', (req: Request, res: Response) => {
       import('../indexer/messageIndexer')
         .then(({ refreshChannels }) => refreshChannels(ids))
         .catch(() => {/* indexer not started in test/backfill modes */});
+      import('../alerts/spikeDetector')
+        .then(({ refreshSpikeChannels }) => refreshSpikeChannels(ids))
+        .catch(() => {});
     }
 
     res.json({ ok: true });
