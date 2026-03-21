@@ -166,6 +166,35 @@ export function getSentimentReportTrend(days: number): { date: string; mood_scor
   });
 }
 
+// ── Weekly Pulse Reports ───────────────────────────────────────────────────────
+
+export interface WeeklyPulseRow {
+  id:        number;
+  taken_at:  string;
+  from_date: string;
+  to_date:   string;
+  day_count: number;
+  avg_mood:  number;
+  raw_json:  string;
+}
+
+export function insertWeeklyPulse(
+  fromDate: string, toDate: string, dayCount: number, avgMood: number, rawJson: string,
+): void {
+  getDb().prepare(`
+    INSERT INTO weekly_pulse_reports (taken_at, from_date, to_date, day_count, avg_mood, raw_json)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).run(new Date().toISOString(), fromDate, toDate, dayCount, avgMood, rawJson);
+}
+
+export function getWeeklyPulseReports(limit = 10): WeeklyPulseRow[] {
+  return getDb()
+    .prepare(`SELECT * FROM weekly_pulse_reports ORDER BY taken_at DESC LIMIT ?`)
+    .all(limit) as WeeklyPulseRow[];
+}
+
+// ── Chat Jobs ─────────────────────────────────────────────────────────────────
+
 export type ChatJobStatus = 'queued' | 'running' | 'completed' | 'failed';
 
 export interface ChatJobRow {

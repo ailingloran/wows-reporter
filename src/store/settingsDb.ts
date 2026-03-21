@@ -15,18 +15,14 @@ function extractHour(cronExpr: string): number {
 // Default values seeded from env vars / config on first run
 const DEFAULTS: Record<string, string> = {
   daily_hour:              String(extractHour(config.dailyCron)),
-  monthly_hour:            String(extractHour(config.monthlyCron)),
   sentiment_hour:          String(extractHour(config.sentimentCron)),
   daily_enabled:           'true',
-  monthly_enabled:         'true',
   sentiment_enabled:       'true',
   daily_delivery:          config.dailyDelivery,
-  monthly_delivery:        config.monthlyDelivery,
   sentiment_message_limit: String(config.sentimentMessageLimit),
   sentiment_channel_ids:   config.sentimentChannelIds.join(','),
   min_index_messages:      '500',
   staff_channel_id:        config.discordStaffChannelId,
-  monthly_channel_id:      config.discordMonthlyChannelId,
   pulse_model:             'gpt-5.1',
   chat_model:              'gpt-5.1',
   narrative_ai_enabled:    'false',

@@ -17,7 +17,6 @@ const TZ = 'Europe/Berlin';
 // ── Task references (kept so they can be stopped on reschedule) ───────────────
 
 let dailyTask:         cron.ScheduledTask | null = null;
-let monthlyTask:       cron.ScheduledTask | null = null;
 let sentimentTask:     cron.ScheduledTask | null = null;
 let weeklyPulseTask:   cron.ScheduledTask | null = null;
 let staffSnapshotTask: cron.ScheduledTask | null = null;
@@ -44,21 +43,6 @@ async function dailyCallback() {
     logger.info('[scheduler] Daily report complete');
   } catch (err) {
     logger.error('[scheduler] Daily report failed:', err);
-  }
-}
-
-async function monthlyCallback() {
-  if (getSetting('monthly_enabled', 'true') !== 'true') {
-    logger.info('[scheduler] Monthly report skipped (disabled via settings)');
-    return;
-  }
-  logger.info('[scheduler] Monthly report triggered');
-  try {
-    const { runMonthlyReport } = await import('./reports/monthly');
-    await runMonthlyReport();
-    logger.info('[scheduler] Monthly report complete');
-  } catch (err) {
-    logger.error('[scheduler] Monthly report failed:', err);
   }
 }
 
@@ -135,11 +119,9 @@ async function staffSnapshotCallback() {
 
 export function registerSchedules(): void {
   const dh = parseInt(getSetting('daily_hour',     '0'),  10);
-  const mh = parseInt(getSetting('monthly_hour',   '0'),  10);
   const sh = parseInt(getSetting('sentiment_hour', '17'), 10);
 
   dailyTask        = cron.schedule(`0 ${dh} * * *`,   dailyCallback,        { timezone: TZ });
-  monthlyTask      = cron.schedule(`0 ${mh} 1 * *`,   monthlyCallback,      { timezone: TZ });
   sentimentTask    = cron.schedule(`0 ${sh} * * *`,   sentimentCallback,    { timezone: TZ });
   // Weekly Pulse Summary — every Monday at 12:00 CET, summarises the past 7 daily pulses
   weeklyPulseTask  = cron.schedule(`0 12 * * 1`,      weeklyPulseCallback,  { timezone: TZ });
@@ -152,24 +134,20 @@ export function registerSchedules(): void {
   narrativeAiTask = cron.schedule(`30 1 * * *`, narrativeAiCallback, { timezone: TZ });
 
   logger.info(
-    `[scheduler] Daily at ${dh}:00, Monthly at ${mh}:00 on 1st, ` +
-    `Community Pulse at ${sh}:00 (Europe/Berlin)`,
+    `[scheduler] Daily at ${dh}:00, Community Pulse at ${sh}:00, ` +
+    `Weekly Pulse Mondays 12:00 (Europe/Berlin)`,
   );
 }
 
 // ── Hot-reload ────────────────────────────────────────────────────────────────
 
-export function rescheduleReport(type: 'daily' | 'monthly' | 'sentiment', hour: number): void {
+export function rescheduleReport(type: 'daily' | 'sentiment', hour: number): void {
   const h = Math.max(0, Math.min(23, Math.round(hour)));
 
   if (type === 'daily') {
     dailyTask?.stop();
     dailyTask = cron.schedule(`0 ${h} * * *`, dailyCallback, { timezone: TZ });
     logger.info(`[scheduler] Daily rescheduled to ${h}:00 (Europe/Berlin)`);
-  } else if (type === 'monthly') {
-    monthlyTask?.stop();
-    monthlyTask = cron.schedule(`0 ${h} 1 * *`, monthlyCallback, { timezone: TZ });
-    logger.info(`[scheduler] Monthly rescheduled to ${h}:00 on 1st (Europe/Berlin)`);
   } else {
     sentimentTask?.stop();
     sentimentTask = cron.schedule(`0 ${h} * * *`, sentimentCallback, { timezone: TZ });

@@ -1,28 +1,15 @@
 /**
  * Weekly Community Pulse Summary
- * Every Monday at 12:00 CET it pulls the last 7 daily Community Pulse reports
- * from the DB, sends the digest to OpenAI, and posts a ranked top-5/6 theme
- * summary to the staff channel.
+ * Every Monday at 12:00 CET it pulls the last 7 daily Community Pulse reports,
+ * synthesises them with gpt-5.1 (one AI call per week, ~$0.01), and saves the
+ * result to the weekly_pulse_reports table for display in the dashboard.
  *
- * No raw messages are re-analysed — this synthesises already-saved daily results,
- * so it costs one lightweight AI call per week (~$0.01).
+ * No Discord embed — dashboard only.
  */
 
-import { EmbedBuilder } from 'discord.js';
 import { logger } from '../logger';
-import { getSetting } from '../store/settingsDb';
-import { getSentimentReports } from '../store/db';
-import { postDailyReport } from '../api/discord';
+import { getSentimentReports, insertWeeklyPulse } from '../store/db';
 import { getWeeklySummary, PulseResult } from '../api/openai';
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function buildMoodBar(score: number): string {
-  const filled = Math.max(1, Math.min(5, Math.round(score)));
-  return '█'.repeat(filled) + '░'.repeat(5 - filled);
-}
-
-// ── Main ─────────────────────────────────────────────────────────────────────
 
 export async function runWeeklyPulseSummary(): Promise<void> {
   // 1. Fetch last 7 daily reports (most-recent first from DB)
@@ -72,46 +59,17 @@ export async function runWeeklyPulseSummary(): Promise<void> {
     })
     .join('\n\n---\n\n');
 
-  // 5. AI synthesis
+  // 5. AI synthesis via gpt-5.1
   const summary = await getWeeklySummary(digest, parsed.length);
   if (!summary) {
     logger.error('[weeklyPulse] AI synthesis failed — aborting');
     return;
   }
 
-  // 6. Build Discord embed
-  const from      = parsed[0].date;
-  const to        = parsed[parsed.length - 1].date;
-  const moodColor = avgMood >= 4 ? 0x2ecc71 : avgMood <= 2 ? 0xe74c3c : 0x9b59b6;
-  const moodBar   = buildMoodBar(avgMood);
+  // 6. Persist to DB for dashboard display
+  const from = parsed[0].date;
+  const to   = parsed[parsed.length - 1].date;
+  insertWeeklyPulse(from, to, parsed.length, avgMood, JSON.stringify(summary));
 
-  const topicsText = summary.top_topics
-    .slice(0, 6)
-    .map((t, i) => {
-      const dayTag = t.days_mentioned > 1
-        ? ` *(${t.days_mentioned}/${parsed.length}d${t.recurring ? ' 🔴' : ''})* `
-        : ' ';
-      return `**${i + 1}. ${t.topic}**${dayTag}\n${t.summary}`;
-    })
-    .join('\n\n');
-
-  const embed = new EmbedBuilder()
-    .setTitle(`📋 Weekly Community Pulse — ${from} → ${to}`)
-    .setColor(moodColor)
-    .setDescription(
-      `Based on **${parsed.length} daily reports**. Avg mood: ${moodBar} **${avgMood.toFixed(1)}/5**\n\n` +
-      `*${summary.week_mood}*`,
-    )
-    .addFields({ name: '🏆 Top Topics This Week', value: topicsText || '_No data_', inline: false });
-
-  if (summary.trending) {
-    embed.addFields({ name: '📈 Most Trending', value: summary.trending, inline: false });
-  }
-
-  embed
-    .setFooter({ text: `WoWS Community Reports · Weekly Pulse · ${from} → ${to}` })
-    .setTimestamp();
-
-  await postDailyReport(embed);
-  logger.info(`[weeklyPulse] Weekly summary posted for ${from} → ${to}`);
+  logger.info(`[weeklyPulse] Weekly summary saved for ${from} → ${to}`);
 }

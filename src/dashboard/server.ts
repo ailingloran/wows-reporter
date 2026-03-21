@@ -16,6 +16,7 @@ import {
   getSentimentReports,
   getSentimentReportTrend,
   getSnapshotsBetween,
+  getWeeklyPulseReports,
 } from '../store/db';
 import { getSetting } from '../store/settingsDb';
 import { countIndexedMessages, getFtsHealth, rebuildFts } from '../store/messageDb';
@@ -98,16 +99,16 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/status', (_req: Request, res: Response) => {
   try {
-    const lastDaily = getLastSnapshot('daily');
-    const lastMonthly = getLastSnapshot('monthly');
+    const lastDaily     = getLastSnapshot('daily');
     const lastSentiment = getLastSentimentReport();
+    const lastWeekly    = getWeeklyPulseReports(1)[0] ?? null;
     res.json({
-      uptime: process.uptime(),
-      lastDailyAt: lastDaily?.taken_at ?? null,
-      lastMonthlyAt: lastMonthly?.taken_at ?? null,
-      lastSentimentAt: lastSentiment?.taken_at ?? null,
-      lastMood: lastSentiment?.mood ?? null,
-      totalMessages: countIndexedMessages(),
+      uptime:           process.uptime(),
+      lastDailyAt:      lastDaily?.taken_at      ?? null,
+      lastSentimentAt:  lastSentiment?.taken_at  ?? null,
+      lastMood:         lastSentiment?.mood       ?? null,
+      lastWeeklyPulseAt: lastWeekly?.taken_at    ?? null,
+      totalMessages:    countIndexedMessages(),
     });
   } catch (error) {
     logger.error('[dashboard] /api/status error:', error);
@@ -128,11 +129,10 @@ app.get('/api/daily', (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/monthly', (_req: Request, res: Response) => {
+app.get('/api/weekly-pulse', (req: Request, res: Response) => {
   try {
-    // Return all monthly snapshots ever recorded — no cap
-    const rows = getSnapshotsBetween('monthly', '2000-01-01', new Date().toISOString());
-    res.json(rows);
+    const limit = Math.min(Number(req.query.limit) || 10, 50);
+    res.json(getWeeklyPulseReports(limit));
   } catch {
     res.status(500).json({ error: 'Internal server error' });
   }
@@ -312,6 +312,20 @@ app.post('/api/trigger/sentiment/live', (_req: Request, res: Response) => {
   }).catch(() => res.status(500).json({ error: 'Failed to load report module' }));
 });
 
+// Weekly Pulse Summary — awaits completion so the dashboard button can show true success/failure
+app.post('/api/trigger/weekly-pulse', (_req: Request, res: Response) => {
+  void (async () => {
+    try {
+      const { runWeeklyPulseSummary } = await import('../reports/weeklyPulse');
+      await runWeeklyPulseSummary();
+      res.json({ ok: true, message: 'Weekly Pulse Summary generated' });
+    } catch (err) {
+      logger.error('[dashboard] Triggered weekly pulse failed:', err);
+      res.status(500).json({ error: 'Weekly Pulse Summary failed' });
+    }
+  })();
+});
+
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
@@ -330,9 +344,8 @@ app.get('/api/settings', (_req: Request, res: Response) => {
 app.post('/api/settings', (req: Request, res: Response) => {
   try {
     const updates = req.body as Record<string, string>;
-    const hourFields: Array<[string, 'daily' | 'monthly' | 'sentiment']> = [
+    const hourFields: Array<[string, 'daily' | 'sentiment']> = [
       ['daily_hour', 'daily'],
-      ['monthly_hour', 'monthly'],
       ['sentiment_hour', 'sentiment'],
     ];
 

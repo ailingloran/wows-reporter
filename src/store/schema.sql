@@ -194,6 +194,20 @@ CREATE INDEX IF NOT EXISTS idx_narrative_ai_daily_date
 CREATE INDEX IF NOT EXISTS idx_narrative_ai_keywords_date
   ON narrative_ai_keywords(date DESC);
 
+-- Weekly Community Pulse summaries (synthesised from 7 daily reports, Monday 12:00 CET)
+CREATE TABLE IF NOT EXISTS weekly_pulse_reports (
+  id        INTEGER PRIMARY KEY AUTOINCREMENT,
+  taken_at  TEXT    NOT NULL,   -- ISO timestamp of when generated
+  from_date TEXT    NOT NULL,   -- YYYY-MM-DD start of week covered
+  to_date   TEXT    NOT NULL,   -- YYYY-MM-DD end of week covered
+  day_count INTEGER NOT NULL,   -- number of daily reports used
+  avg_mood  REAL    NOT NULL,   -- average mood score across the week
+  raw_json  TEXT    NOT NULL    -- WeeklyPulseResult JSON
+);
+
+CREATE INDEX IF NOT EXISTS idx_weekly_pulse_taken_at
+  ON weekly_pulse_reports(taken_at DESC);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_snapshots_period_taken
   ON snapshots(period, taken_at DESC);
