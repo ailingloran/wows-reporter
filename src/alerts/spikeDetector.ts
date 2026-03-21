@@ -12,7 +12,7 @@
 
 import { Message, TextBasedChannel } from 'discord.js';
 import { getDiscordClient } from '../api/discord';
-import { getSetting } from '../store/settingsDb';
+import { getSetting, setSetting } from '../store/settingsDb';
 import { config } from '../config';
 import { logger } from '../logger';
 
@@ -162,7 +162,23 @@ export function startSpikeDetector(): void {
 
     // Fire
     lastAlertAt = now;
-    const alertText = buildAlertMessage(slidingWindow, uniqueUsers, windowMinutes);
+    const snapshot = [...slidingWindow];
+    const alertText = buildAlertMessage(snapshot, uniqueUsers, windowMinutes);
+
+    // Persist for Overview page
+    const groupCounts: Record<string, number> = {};
+    for (const entry of snapshot) {
+      for (const g of entry.matchedGroups) {
+        groupCounts[g] = (groupCounts[g] ?? 0) + 1;
+      }
+    }
+    setSetting('last_spike_alert', JSON.stringify({
+      fired_at:      new Date(now).toISOString(),
+      message_count: snapshot.length,
+      unique_users:  uniqueUsers,
+      window_minutes: windowMinutes,
+      categories:    groupCounts,
+    }));
 
     void (async () => {
       try {
@@ -170,7 +186,7 @@ export function startSpikeDetector(): void {
         if (ch && 'send' in ch) {
           await ch.send(alertText);
           logger.info(
-            `[spikeDetector] Alert fired — ${slidingWindow.length} msgs, ${uniqueUsers} users`,
+            `[spikeDetector] Alert fired — ${snapshot.length} msgs, ${uniqueUsers} users`,
           );
         }
       } catch (err) {

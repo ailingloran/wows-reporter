@@ -102,6 +102,8 @@ app.get('/api/status', (_req: Request, res: Response) => {
     const lastDaily     = getLastSnapshot('daily');
     const lastSentiment = getLastSentimentReport();
     const lastWeekly    = getWeeklyPulseReports()[0] ?? null;
+    const spikeRaw      = getSetting('last_spike_alert', '');
+    const lastSpikeAlert = spikeRaw ? JSON.parse(spikeRaw) : null;
     res.json({
       uptime:           process.uptime(),
       lastDailyAt:      lastDaily?.taken_at      ?? null,
@@ -109,6 +111,7 @@ app.get('/api/status', (_req: Request, res: Response) => {
       lastMood:         lastSentiment?.mood       ?? null,
       lastWeeklyPulseAt: lastWeekly?.taken_at    ?? null,
       totalMessages:    countIndexedMessages(),
+      lastSpikeAlert,
     });
   } catch (error) {
     logger.error('[dashboard] /api/status error:', error);
