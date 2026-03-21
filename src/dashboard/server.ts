@@ -101,7 +101,7 @@ app.get('/api/status', (_req: Request, res: Response) => {
   try {
     const lastDaily     = getLastSnapshot('daily');
     const lastSentiment = getLastSentimentReport();
-    const lastWeekly    = getWeeklyPulseReports(1)[0] ?? null;
+    const lastWeekly    = getWeeklyPulseReports()[0] ?? null;
     res.json({
       uptime:           process.uptime(),
       lastDailyAt:      lastDaily?.taken_at      ?? null,
