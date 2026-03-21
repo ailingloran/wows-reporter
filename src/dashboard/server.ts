@@ -129,10 +129,9 @@ app.get('/api/daily', (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/weekly-pulse', (req: Request, res: Response) => {
+app.get('/api/weekly-pulse', (_req: Request, res: Response) => {
   try {
-    const limit = Math.min(Number(req.query.limit) || 10, 50);
-    res.json(getWeeklyPulseReports(limit));
+    res.json(getWeeklyPulseReports());
   } catch {
     res.status(500).json({ error: 'Internal server error' });
   }

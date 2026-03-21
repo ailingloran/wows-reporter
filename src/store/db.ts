@@ -187,10 +187,10 @@ export function insertWeeklyPulse(
   `).run(new Date().toISOString(), fromDate, toDate, dayCount, avgMood, rawJson);
 }
 
-export function getWeeklyPulseReports(limit = 10): WeeklyPulseRow[] {
+export function getWeeklyPulseReports(): WeeklyPulseRow[] {
   return getDb()
-    .prepare(`SELECT * FROM weekly_pulse_reports ORDER BY taken_at DESC LIMIT ?`)
-    .all(limit) as WeeklyPulseRow[];
+    .prepare(`SELECT * FROM weekly_pulse_reports ORDER BY taken_at DESC`)
+    .all() as WeeklyPulseRow[];
 }
 
 // ── Chat Jobs ─────────────────────────────────────────────────────────────────
