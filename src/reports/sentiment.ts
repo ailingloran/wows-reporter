@@ -22,10 +22,19 @@ export type SentimentSource = 'db' | 'live';
 
 // Words to ignore when matching pain points across reports
 const DELTA_IGNORE = new Set([
+  // generic filler
   'players', 'player', 'about', 'their', 'with', 'from', 'this', 'that',
   'have', 'been', 'were', 'are', 'the', 'and', 'for', 'discussing',
-  'mentioned', 'saying', 'said', 'game', 'community', 'channel', 'they',
-  'very', 'more', 'some', 'most', 'many', 'when', 'which', 'that',
+  'mentioned', 'saying', 'said', 'community', 'channel', 'they',
+  'very', 'more', 'some', 'most', 'many', 'when', 'which', 'also',
+  'other', 'such', 'like', 'well', 'just', 'even', 'only', 'into',
+  'after', 'during', 'while', 'over', 'around', 'still', 'often',
+  'across', 'within', 'between', 'without', 'against', 'continue',
+  // ubiquitous gaming/WoWS words that appear in almost every report
+  'game', 'games', 'server', 'servers', 'issue', 'issues', 'problem',
+  'problems', 'match', 'matches', 'battle', 'battles', 'ship', 'ships',
+  'mode', 'modes', 'team', 'teams', 'week', 'days', 'time', 'times',
+  'feel', 'feels', 'feeling', 'user', 'users', 'content', 'report',
 ]);
 
 function extractSignificantWords(text: string): string[] {
@@ -67,7 +76,7 @@ function markRecurring(currentItems: PulseItem[], previousReports: SentimentRepo
 
     for (const prev of prevPains) {
       const overlap = currentWords.filter(w => prev.words.includes(w)).length;
-      if (overlap >= 2) {
+      if (overlap >= 3) {
         const daysAgo = Math.round((Date.now() - new Date(prev.takenAt).getTime()) / 86_400_000);
         if (bestDaysAgo === null || daysAgo > bestDaysAgo) {
           bestDaysAgo = daysAgo;
