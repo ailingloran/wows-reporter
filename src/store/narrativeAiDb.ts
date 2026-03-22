@@ -516,6 +516,49 @@ export interface EmergingKeyword {
   heat:        'hot' | 'warm' | 'cool';
 }
 
+/** Yesterday's emerging keywords vs 7-day rolling average — no extra API cost. */
+export function getEmergingKeywordsAIDailyDelta(): EmergingKeyword[] {
+  const db  = getDb();
+  const now = new Date();
+
+  const yesterday  = new Date(now); yesterday.setDate(now.getDate() - 1);
+  const sevenAgo   = new Date(now); sevenAgo.setDate(now.getDate() - 8); // days 2–8 as baseline
+
+  const yStr  = yesterday.toISOString().slice(0, 10);
+  const s7Str = sevenAgo.toISOString().slice(0, 10);
+
+  type KwRow = { keyword: string; total: number };
+
+  // Yesterday's counts
+  const recent = db.prepare(`
+    SELECT keyword, SUM(count) AS total FROM narrative_ai_keywords
+    WHERE date = ? GROUP BY keyword ORDER BY total DESC LIMIT 50
+  `).all(yStr) as KwRow[];
+
+  // 7-day rolling average (days 2–8 ago, excluding yesterday)
+  const baseline = db.prepare(`
+    SELECT keyword, SUM(count) AS total FROM narrative_ai_keywords
+    WHERE date >= ? AND date < ? GROUP BY keyword
+  `).all(s7Str, yStr) as KwRow[];
+
+  // Convert to daily average
+  const baseMap = new Map(baseline.map(k => [k.keyword, k.total / 7]));
+
+  return recent
+    .filter(r => r.total >= 2)
+    .map(r => {
+      const avgDaily = baseMap.get(r.keyword) ?? 0;
+      return {
+        keyword:     r.keyword,
+        recentCount: r.total,
+        priorCount:  Math.round(avgDaily * 10) / 10, // store as daily avg for display
+        heat: (r.total >= 10 ? 'hot' : r.total >= 5 ? 'warm' : 'cool') as 'hot' | 'warm' | 'cool',
+      };
+    })
+    // Only surface words that are meaningfully above their daily baseline
+    .filter(r => r.recentCount > (r.priorCount * 2 + 1));
+}
+
 export function getEmergingKeywordsAI(days = 14): EmergingKeyword[] {
   const db       = getDb();
   const now      = Date.now();

@@ -49,6 +49,7 @@ import {
   getNarrativeHeatmapAI,
   reprocessNarrativeHistoryAI,
   estimateAiReprocessCost,
+  getEmergingKeywordsAIDailyDelta,
 } from '../store/narrativeAiDb';
 
 const app = express();
@@ -660,8 +661,12 @@ app.get('/api/narrative-ai/trend', (req: Request, res: Response) => {
 app.get('/api/narrative-ai/keywords', (req: Request, res: Response) => {
   if (!aiNarrativeEnabled()) { res.status(503).json({ error: 'AI Narrative Drift is disabled' }); return; }
   try {
-    const days = Math.min(Math.max(Number(req.query.days) || 14, 7), 90);
-    res.json(getEmergingKeywordsAI(days));
+    if (req.query.delta === 'day') {
+      res.json(getEmergingKeywordsAIDailyDelta());
+    } else {
+      const days = Math.min(Math.max(Number(req.query.days) || 14, 7), 90);
+      res.json(getEmergingKeywordsAI(days));
+    }
   } catch (error) {
     logger.error('[dashboard] /api/narrative-ai/keywords error:', error);
     res.status(500).json({ error: 'Internal server error' });
