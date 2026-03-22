@@ -197,11 +197,23 @@ export async function processYesterdayFromMessagesAI(): Promise<void> {
   }
 }
 
-export async function reprocessNarrativeHistoryAI(): Promise<{ processed: number; errors: number }> {
+export async function reprocessNarrativeHistoryAI(
+  opts: { full?: boolean; days?: number } = {},
+): Promise<{ processed: number; errors: number }> {
+  const { full = false, days = 14 } = opts;
   const db = getDb();
-  db.prepare('DELETE FROM narrative_ai_daily').run();
-  db.prepare('DELETE FROM narrative_ai_keywords').run();
-  logger.info('[narrative-ai] Cleared AI narrative tables for full reprocess');
+
+  // Cutoff date: only process the last N days
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+  if (full) {
+    // Only wipe rows within the requested depth — don't nuke older history
+    db.prepare('DELETE FROM narrative_ai_daily WHERE date >= ?').run(cutoffStr);
+    db.prepare('DELETE FROM narrative_ai_keywords WHERE date >= ?').run(cutoffStr);
+    logger.info(`[narrative-ai] Cleared AI tables from ${cutoffStr} for full reprocess (${days}d)`);
+  }
 
   let msgDb: Database.Database;
   try {
@@ -211,10 +223,22 @@ export async function reprocessNarrativeHistoryAI(): Promise<{ processed: number
     return { processed: 0, errors: 1 };
   }
 
-  const dates = (msgDb.prepare(
+  let dates = (msgDb.prepare(
     `SELECT DISTINCT date(created_at / 1000, 'unixepoch') AS d
-     FROM discord_messages ORDER BY d ASC`,
-  ).all() as { d: string }[]).map(r => r.d);
+     FROM discord_messages
+     WHERE date(created_at / 1000, 'unixepoch') >= ?
+     ORDER BY d ASC`,
+  ).all(cutoffStr) as { d: string }[]).map(r => r.d);
+
+  // Incremental: skip dates already present
+  if (!full) {
+    const done = new Set(
+      (db.prepare('SELECT DISTINCT date FROM narrative_ai_daily WHERE date >= ?')
+        .all(cutoffStr) as { date: string }[]).map(r => r.date),
+    );
+    dates = dates.filter(d => !done.has(d));
+    logger.info(`[narrative-ai] Incremental mode (${days}d) — ${dates.length} new date(s) to process`);
+  }
 
   let processed = 0;
   let errors    = 0;
@@ -233,6 +257,27 @@ export async function reprocessNarrativeHistoryAI(): Promise<{ processed: number
   msgDb.close();
   logger.info(`[narrative-ai] Reprocess complete: ${processed} ok, ${errors} errors`);
   return { processed, errors };
+}
+
+/** Estimate cost of an AI reprocess for N days. Returns message count and rough USD. */
+export function estimateAiReprocessCost(days: number): { days: number; messageCount: number; estimatedUsd: number } {
+  let msgDb: Database.Database;
+  try {
+    msgDb = openMsgDb();
+  } catch {
+    return { days, messageCount: 0, estimatedUsd: 0 };
+  }
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString().slice(0, 10);
+  const row = msgDb.prepare(
+    `SELECT COUNT(*) AS cnt FROM discord_messages
+     WHERE date(created_at / 1000, 'unixepoch') >= ?`,
+  ).get(cutoffStr) as { cnt: number };
+  msgDb.close();
+  // ~150 input tokens/message at $0.15/1M tokens (gpt-4.1-mini)
+  const estimatedUsd = Math.round((row.cnt * 150 * 0.15) / 1_000_000 * 100) / 100;
+  return { days, messageCount: row.cnt, estimatedUsd };
 }
 
 // ── Read functions (same signatures as narrativeDb.ts) ────────────────────────

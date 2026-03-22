@@ -48,6 +48,7 @@ import {
   getNarrativeDriftAI,
   getNarrativeHeatmapAI,
   reprocessNarrativeHistoryAI,
+  estimateAiReprocessCost,
 } from '../store/narrativeAiDb';
 
 const app = express();
@@ -605,9 +606,10 @@ app.get('/api/narrative/suggestions', (_req: Request, res: Response) => {
   }
 });
 
-app.post('/api/narrative/reprocess', (_req: Request, res: Response) => {
+app.post('/api/narrative/reprocess', (req: Request, res: Response) => {
   try {
-    const result = reprocessNarrativeHistory();
+    const full = req.body?.full !== false; // default: true for lexicon (cheap, safe)
+    const result = reprocessNarrativeHistory({ full });
     res.json({ ok: true, ...result });
   } catch (error) {
     logger.error('[dashboard] /api/narrative/reprocess error:', error);
@@ -666,11 +668,24 @@ app.get('/api/narrative-ai/keywords', (req: Request, res: Response) => {
   }
 });
 
-app.post('/api/narrative-ai/reprocess', (_req: Request, res: Response) => {
+app.get('/api/narrative-ai/estimate', (req: Request, res: Response) => {
   if (!aiNarrativeEnabled()) { res.status(503).json({ error: 'AI Narrative Drift is disabled' }); return; }
-  // Respond immediately — reprocess runs in background (can take several minutes for large history)
-  res.json({ ok: true, background: true });
-  reprocessNarrativeHistoryAI().catch(err =>
+  try {
+    const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 90);
+    res.json(estimateAiReprocessCost(days));
+  } catch (error) {
+    logger.error('[dashboard] /api/narrative-ai/estimate error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/narrative-ai/reprocess', (req: Request, res: Response) => {
+  if (!aiNarrativeEnabled()) { res.status(503).json({ error: 'AI Narrative Drift is disabled' }); return; }
+  const full = req.body?.full === true;           // default: incremental
+  const days = Math.min(Math.max(Number(req.body?.days) || 14, 1), 90);
+  // Respond immediately — reprocess runs in background
+  res.json({ ok: true, background: true, full, days });
+  reprocessNarrativeHistoryAI({ full, days }).catch(err =>
     logger.error('[dashboard] /api/narrative-ai/reprocess background error:', err),
   );
 });

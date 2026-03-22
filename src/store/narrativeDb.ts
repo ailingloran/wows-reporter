@@ -425,13 +425,17 @@ export function processYesterdayFromMessages(): void {
 
 // ── Backfill ───────────────────────────────────────────────────────────────────
 
-export function reprocessNarrativeHistory(): { processed: number; errors: number } {
+export function reprocessNarrativeHistory(
+  opts: { full?: boolean } = {},
+): { processed: number; errors: number } {
+  const { full = true } = opts;
   const db = getDb();
 
-  // Wipe existing derived data so stale rows from old taxonomy/stopwords don't persist
-  db.prepare('DELETE FROM narrative_daily').run();
-  db.prepare('DELETE FROM narrative_keywords').run();
-  logger.info('[narrative] Cleared narrative tables for full reprocess');
+  if (full) {
+    db.prepare('DELETE FROM narrative_daily').run();
+    db.prepare('DELETE FROM narrative_keywords').run();
+    logger.info('[narrative] Cleared narrative tables for full reprocess');
+  }
 
   let msgDb: Database.Database;
   try {
@@ -442,10 +446,20 @@ export function reprocessNarrativeHistory(): { processed: number; errors: number
   }
 
   // Find all distinct UTC calendar dates that have messages
-  const dates = (msgDb.prepare(
+  let dates = (msgDb.prepare(
     `SELECT DISTINCT date(created_at / 1000, 'unixepoch') AS d
      FROM discord_messages ORDER BY d ASC`,
   ).all() as { d: string }[]).map(r => r.d);
+
+  // Incremental: skip dates already present in narrative_daily
+  if (!full) {
+    const done = new Set(
+      (db.prepare('SELECT DISTINCT date FROM narrative_daily').all() as { date: string }[])
+        .map(r => r.date),
+    );
+    dates = dates.filter(d => !done.has(d));
+    logger.info(`[narrative] Incremental mode — ${dates.length} new date(s) to process`);
+  }
 
   let processed = 0;
   let errors = 0;
@@ -462,7 +476,6 @@ export function reprocessNarrativeHistory(): { processed: number; errors: number
   }
 
   msgDb.close();
-
   logger.info(`[narrative] Reprocess complete: ${processed} ok, ${errors} errors`);
   return { processed, errors };
 }
