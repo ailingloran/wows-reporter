@@ -187,6 +187,117 @@ export function getStaffActivity(days: number): StaffActivityRow[] {
   });
 }
 
+export function getStaffActivityByMonth(year: number, month: number): StaffActivityRow[] {
+  const start = Date.UTC(year, month - 1, 1);
+  const end   = Date.UTC(year, month,     1); // exclusive
+  const db    = getDb();
+
+  const metrics = db.prepare(`
+    SELECT
+      user_id,
+      MAX(display_name) AS display_name,
+      COUNT(*) AS message_count,
+      COUNT(DISTINCT channel_id) AS channel_count,
+      COUNT(DISTINCT thread_id) AS thread_count,
+      MAX(created_at) AS last_activity,
+      (
+        SELECT e2.channel_name FROM staff_message_events e2
+        WHERE e2.user_id = e.user_id AND e2.created_at >= ? AND e2.created_at < ?
+        GROUP BY e2.channel_id ORDER BY COUNT(*) DESC LIMIT 1
+      ) AS top_channel
+    FROM staff_message_events e
+    WHERE created_at >= ? AND created_at < ?
+    GROUP BY user_id
+  `).all(start, end, start, end) as Array<{
+    user_id:       string;
+    display_name:  string;
+    message_count: number;
+    channel_count: number;
+    thread_count:  number;
+    last_activity: number;
+    top_channel:   string | null;
+  }>;
+
+  const activeUserIds = new Set(metrics.map(m => m.user_id));
+
+  // Explicit group assignments (highest priority)
+  const explicitMap = new Map<string, { group_id: number; group_name: string }>();
+  (db.prepare(`
+    SELECT stu.user_id, sg.id AS group_id, sg.name AS group_name
+    FROM staff_tracked_users stu
+    JOIN staff_groups sg ON sg.id = stu.group_id
+  `).all() as Array<{ user_id: string; group_id: number; group_name: string }>)
+    .forEach(r => explicitMap.set(r.user_id, r));
+
+  // Group from most recent event ever (fallback for role-tracked users)
+  const eventGroupMap = new Map<string, { group_id: number; group_name: string }>();
+  (db.prepare(`
+    SELECT e.user_id, e.group_id, sg.name AS group_name
+    FROM staff_message_events e
+    JOIN staff_groups sg ON sg.id = e.group_id
+    WHERE e.created_at = (
+      SELECT MAX(e2.created_at) FROM staff_message_events e2 WHERE e2.user_id = e.user_id
+    )
+    GROUP BY e.user_id
+  `).all() as Array<{ user_id: string; group_id: number; group_name: string }>)
+    .forEach(r => eventGroupMap.set(r.user_id, r));
+
+  // Active rows
+  const activeRows: StaffActivityRow[] = metrics.map(m => {
+    const group = explicitMap.get(m.user_id) ?? eventGroupMap.get(m.user_id) ?? { group_id: 0, group_name: 'Unknown' };
+    return { ...m, ...group };
+  });
+
+  // Build full list of known Moderators + Helpers (for inactive detection)
+  const knownUsers = new Map<string, { user_id: string; group_id: number; group_name: string; display_name: string }>();
+
+  // From historical events
+  (db.prepare(`
+    SELECT e.user_id, sg.id AS group_id, sg.name AS group_name, MAX(e.display_name) AS display_name
+    FROM staff_message_events e
+    JOIN staff_groups sg ON sg.id = e.group_id
+    WHERE sg.name IN ('Moderators', 'Helpers')
+    GROUP BY e.user_id
+  `).all() as Array<{ user_id: string; group_id: number; group_name: string; display_name: string }>)
+    .forEach(r => knownUsers.set(r.user_id, r));
+
+  // From explicit tracking (override group; keep historical display_name if available)
+  (db.prepare(`
+    SELECT stu.user_id, sg.id AS group_id, sg.name AS group_name
+    FROM staff_tracked_users stu
+    JOIN staff_groups sg ON sg.id = stu.group_id
+    WHERE sg.name IN ('Moderators', 'Helpers')
+  `).all() as Array<{ user_id: string; group_id: number; group_name: string }>)
+    .forEach(r => {
+      const existing = knownUsers.get(r.user_id);
+      knownUsers.set(r.user_id, {
+        user_id:      r.user_id,
+        group_id:     r.group_id,
+        group_name:   r.group_name,
+        display_name: existing?.display_name ?? r.user_id,
+      });
+    });
+
+  const inactiveRows: StaffActivityRow[] = [];
+  for (const [userId, info] of knownUsers) {
+    if (!activeUserIds.has(userId)) {
+      inactiveRows.push({
+        user_id:       userId,
+        display_name:  info.display_name,
+        group_id:      info.group_id,
+        group_name:    info.group_name,
+        message_count: 0,
+        channel_count: 0,
+        thread_count:  0,
+        last_activity: 0,
+        top_channel:   null,
+      });
+    }
+  }
+
+  return [...activeRows, ...inactiveRows];
+}
+
 // ── Weekly snapshots ──────────────────────────────────────────────────────────
 
 export function takeWeeklySnapshot(): void {

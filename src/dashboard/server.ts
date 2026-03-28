@@ -25,7 +25,7 @@ import { rescheduleReport } from '../scheduler';
 import { createChatJob, getChatHistoryPage, getChatJobResponse, removeChatJob } from './chatJobs';
 import {
   addRoleToGroup, addUserToGroup,
-  getStaffActivity, getStaffGroupConfig,
+  getStaffActivity, getStaffActivityByMonth, getStaffGroupConfig,
   getWeeklySnapshots,
   removeRoleFromGroup, removeUserFromGroup,
   takeWeeklySnapshot,
@@ -427,8 +427,18 @@ app.get('/api/staff/config', (_req: Request, res: Response) => {
 
 app.get('/api/staff/activity', (req: Request, res: Response) => {
   try {
-    const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 30);
-    res.json(getStaffActivity(days));
+    const { year, month } = req.query;
+    if (year && month) {
+      const y = parseInt(year as string, 10);
+      const m = parseInt(month as string, 10);
+      if (isNaN(y) || isNaN(m) || m < 1 || m > 12) {
+        res.status(400).json({ error: 'Invalid year or month' }); return;
+      }
+      res.json(getStaffActivityByMonth(y, m));
+    } else {
+      const days = Math.min(Math.max(Number(req.query.days) || 7, 1), 365);
+      res.json(getStaffActivity(days));
+    }
   } catch (error) {
     logger.error('[dashboard] /api/staff/activity error:', error);
     res.status(500).json({ error: 'Internal server error' });
