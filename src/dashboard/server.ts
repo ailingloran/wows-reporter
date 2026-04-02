@@ -25,7 +25,7 @@ import { rescheduleReport } from '../scheduler';
 import { createChatJob, getChatHistoryPage, getChatJobResponse, removeChatJob } from './chatJobs';
 import {
   addRoleToGroup, addUserToGroup,
-  getStaffActivity, getStaffActivityByMonth, getStaffGroupConfig,
+  getStaffActivity, getStaffActivityByMonth, getStaffActiveMonths, getStaffGroupConfig,
   getWeeklySnapshots,
   removeRoleFromGroup, removeUserFromGroup,
   takeWeeklySnapshot,
@@ -421,6 +421,15 @@ app.get('/api/staff/config', (_req: Request, res: Response) => {
     res.json(getStaffGroupConfig());
   } catch (error) {
     logger.error('[dashboard] /api/staff/config error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/staff/active-months', (_req: Request, res: Response) => {
+  try {
+    res.json(getStaffActiveMonths());
+  } catch (error) {
+    logger.error('[dashboard] /api/staff/active-months error:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

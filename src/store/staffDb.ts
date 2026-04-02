@@ -298,6 +298,18 @@ export function getStaffActivityByMonth(year: number, month: number): StaffActiv
   return [...activeRows, ...inactiveRows];
 }
 
+/** Returns distinct {year, month} pairs that have at least one staff message event, ascending. */
+export function getStaffActiveMonths(): Array<{ year: number; month: number }> {
+  const rows = getDb().prepare(`
+    SELECT DISTINCT
+      CAST(strftime('%Y', datetime(created_at / 1000, 'unixepoch')) AS INTEGER) AS year,
+      CAST(strftime('%m', datetime(created_at / 1000, 'unixepoch')) AS INTEGER) AS month
+    FROM staff_message_events
+    ORDER BY year ASC, month ASC
+  `).all() as Array<{ year: number; month: number }>;
+  return rows;
+}
+
 // ── Weekly snapshots ──────────────────────────────────────────────────────────
 
 export function takeWeeklySnapshot(): void {
