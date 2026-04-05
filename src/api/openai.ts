@@ -291,7 +291,7 @@ export async function analyseCommunityPulse(messages: string[]): Promise<PulseRe
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: `Analyse these ${usedMessages} Discord messages:\n\n${messageBlock}` },
       ],
-      max_completion_tokens: 16000,
+      max_completion_tokens: 32000,
     });
 
     logger.info(`[openai] Pulse finish_reason: ${response.choices[0]?.finish_reason}, content length: ${response.choices[0]?.message?.content?.length ?? 0}`);
