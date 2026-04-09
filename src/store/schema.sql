@@ -208,6 +208,44 @@ CREATE TABLE IF NOT EXISTS weekly_pulse_reports (
 CREATE INDEX IF NOT EXISTS idx_weekly_pulse_taken_at
   ON weekly_pulse_reports(taken_at DESC);
 
+-- ── Compliance / Tone Monitor ─────────────────────────────────────────────────
+
+-- Raw message content captured from watched users
+CREATE TABLE IF NOT EXISTS compliance_messages (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id   TEXT    NOT NULL UNIQUE,
+  user_id      TEXT    NOT NULL,
+  display_name TEXT    NOT NULL,
+  channel_id   TEXT    NOT NULL,
+  channel_name TEXT    NOT NULL,
+  content      TEXT    NOT NULL,
+  created_at   INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_compliance_msg_user_time
+  ON compliance_messages(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_compliance_msg_time
+  ON compliance_messages(created_at DESC);
+
+-- AI analysis results per message
+CREATE TABLE IF NOT EXISTS compliance_reviews (
+  id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+  message_id         TEXT    NOT NULL REFERENCES compliance_messages(message_id) ON DELETE CASCADE,
+  reviewed_at        INTEGER NOT NULL,
+  helpfulness_score  INTEGER NOT NULL,
+  tone_score         INTEGER NOT NULL,
+  issues             TEXT    NOT NULL DEFAULT '[]',
+  summary            TEXT    NOT NULL,
+  flagged            INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_compliance_review_message
+  ON compliance_reviews(message_id);
+
+CREATE INDEX IF NOT EXISTS idx_compliance_review_flagged
+  ON compliance_reviews(flagged, reviewed_at DESC);
+
 -- Indexes for common queries
 CREATE INDEX IF NOT EXISTS idx_snapshots_period_taken
   ON snapshots(period, taken_at DESC);

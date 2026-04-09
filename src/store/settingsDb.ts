@@ -32,6 +32,7 @@ const DEFAULTS: Record<string, string> = {
   spike_alert_window_minutes:   '10',
   spike_alert_cooldown_minutes: '45',
   spike_alert_min_users:        '5',
+  compliance_watched_users:     '["282918131762987008","629846346244947971"]',
 };
 
 export function initSettings(): void {

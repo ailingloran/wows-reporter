@@ -41,6 +41,14 @@ import {
   getAiSuggestedImprovements,
 } from '../store/narrativeDb';
 
+import {
+  getComplianceMessages,
+  getComplianceStats,
+  getWatchedUserIds,
+  setWatchedUserIds,
+} from '../store/complianceDb';
+import { runComplianceReview } from '../store/complianceChecker';
+
 // ── AI Narrative Drift (optional — gated by NARRATIVE_AI_ENABLED) ─────────────
 import {
   getCategoryTrendAI,
@@ -572,6 +580,61 @@ app.post('/api/tokens/verify', (req: Request, res: Response) => {
     return;
   }
   res.json({ valid: verifyToken(token) });
+});
+
+// ── Compliance / Tone Monitor ────────────────────────────────────────────────
+
+app.get('/api/compliance/messages', (req: Request, res: Response) => {
+  try {
+    const userId     = req.query.userId as string | undefined;
+    const flaggedOnly = req.query.flagged === 'true';
+    const limit      = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+    const offset     = Math.max(Number(req.query.offset) || 0, 0);
+    res.json(getComplianceMessages({ userId, flaggedOnly, limit, offset }));
+  } catch (error) {
+    logger.error('[dashboard] GET /api/compliance/messages error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/compliance/stats', (_req: Request, res: Response) => {
+  try {
+    res.json(getComplianceStats());
+  } catch (error) {
+    logger.error('[dashboard] GET /api/compliance/stats error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/compliance/settings', (_req: Request, res: Response) => {
+  try {
+    res.json({ watched_user_ids: getWatchedUserIds() });
+  } catch (error) {
+    logger.error('[dashboard] GET /api/compliance/settings error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/compliance/settings', (req: Request, res: Response) => {
+  try {
+    const { watched_user_ids } = req.body as { watched_user_ids?: unknown };
+    if (!Array.isArray(watched_user_ids) || watched_user_ids.some(id => typeof id !== 'string' || !id.trim())) {
+      res.status(400).json({ error: 'watched_user_ids must be a non-empty array of strings' });
+      return;
+    }
+    setWatchedUserIds(watched_user_ids as string[]);
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('[dashboard] POST /api/compliance/settings error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/compliance/review', (_req: Request, res: Response) => {
+  res.json({ ok: true, background: true });
+  runComplianceReview().catch((err: unknown) => {
+    logger.error('[dashboard] Compliance review background error:', err);
+  });
 });
 
 // ── Narrative drift tracking ───────────────────────────────────────────────────

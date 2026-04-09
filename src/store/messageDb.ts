@@ -353,3 +353,44 @@ export function queryIndexedMessages(
 
   return [...matching, ...padding];
 }
+
+export interface ContextMessage {
+  author_id:  string;
+  content:    string;
+  created_at: number;
+}
+
+/**
+ * Returns up to `before` messages immediately before and `after` messages
+ * immediately after the given timestamp in the same channel.
+ * Used to give the compliance AI conversational context.
+ */
+export function getMessagesAroundTimestamp(
+  channelId:  string,
+  timestamp:  number,
+  before = 3,
+  after  = 1,
+): { before: ContextMessage[]; after: ContextMessage[] } {
+  const d = db();
+
+  const beforeRows = d.prepare(`
+    SELECT author_id, content, created_at
+    FROM discord_messages
+    WHERE channel_id = ? AND created_at < ?
+    ORDER BY created_at DESC
+    LIMIT ?
+  `).all(channelId, timestamp, before) as ContextMessage[];
+
+  const afterRows = d.prepare(`
+    SELECT author_id, content, created_at
+    FROM discord_messages
+    WHERE channel_id = ? AND created_at > ?
+    ORDER BY created_at ASC
+    LIMIT ?
+  `).all(channelId, timestamp, after) as ContextMessage[];
+
+  return {
+    before: beforeRows.reverse(), // chronological order
+    after:  afterRows,
+  };
+}

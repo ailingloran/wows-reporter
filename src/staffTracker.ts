@@ -20,16 +20,19 @@ import {
   getTrackedUserMap,
   logStaffMessage,
 } from './store/staffDb';
+import { getWatchedUserIds, insertComplianceMessage } from './store/complianceDb';
 
 const CACHE_TTL_MS = 5 * 60_000; // 5 minutes
 
 let trackedUserMap = new Map<string, number>();
 let trackedRoleMap = new Map<string, number>();
+let watchedComplianceIds = new Set<string>();
 let lastRefresh = 0;
 
 function refreshCache(): void {
   trackedUserMap = getTrackedUserMap();
   trackedRoleMap = getTrackedRoleMap();
+  watchedComplianceIds = new Set(getWatchedUserIds());
   lastRefresh = Date.now();
 }
 
@@ -90,6 +93,19 @@ export function startStaffTracker(): void {
       message_id:   message.id,
       created_at:   message.createdTimestamp,
     });
+
+    // Capture message content for compliance monitoring if user is watched
+    if (watchedComplianceIds.has(message.author.id) && message.content.trim()) {
+      insertComplianceMessage({
+        message_id:   message.id,
+        user_id:      message.author.id,
+        display_name: message.member.displayName,
+        channel_id:   channelId,
+        channel_name: channelName,
+        content:      message.content,
+        created_at:   message.createdTimestamp,
+      });
+    }
   });
 
   logger.info('[staffTracker] Staff activity tracker active');
