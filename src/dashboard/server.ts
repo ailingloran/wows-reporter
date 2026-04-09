@@ -586,11 +586,13 @@ app.post('/api/tokens/verify', (req: Request, res: Response) => {
 
 app.get('/api/compliance/messages', (req: Request, res: Response) => {
   try {
-    const userId     = req.query.userId as string | undefined;
+    const userId      = req.query.userId as string | undefined;
     const flaggedOnly = req.query.flagged === 'true';
-    const limit      = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
-    const offset     = Math.max(Number(req.query.offset) || 0, 0);
-    res.json(getComplianceMessages({ userId, flaggedOnly, limit, offset }));
+    const windowHours = req.query.window !== undefined ? Math.max(Number(req.query.window), 0) : 24;
+    const minLength   = req.query.minLength !== undefined ? Math.max(Number(req.query.minLength), 0) : 30;
+    const limit       = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+    const offset      = Math.max(Number(req.query.offset) || 0, 0);
+    res.json(getComplianceMessages({ userId, flaggedOnly, windowHours, minLength, limit, offset }));
   } catch (error) {
     logger.error('[dashboard] GET /api/compliance/messages error:', error);
     res.status(500).json({ error: 'Internal server error' });

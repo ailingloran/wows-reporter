@@ -147,12 +147,14 @@ export function insertComplianceReview(result: AiComplianceResult): void {
 // ── Reads ─────────────────────────────────────────────────────────────────────
 
 export function getComplianceMessages(opts: {
-  userId?:     string;
+  userId?:      string;
   flaggedOnly?: boolean;
-  limit?:      number;
-  offset?:     number;
+  windowHours?: number;   // 0 = all time
+  minLength?:   number;   // minimum content length in characters
+  limit?:       number;
+  offset?:      number;
 }): { messages: ComplianceMessageWithReview[]; total: number } {
-  const { userId, flaggedOnly = false, limit = 30, offset = 0 } = opts;
+  const { userId, flaggedOnly = false, windowHours = 24, minLength = 30, limit = 30, offset = 0 } = opts;
 
   const conditions: string[] = [];
   const params: unknown[] = [];
@@ -163,6 +165,14 @@ export function getComplianceMessages(opts: {
   }
   if (flaggedOnly) {
     conditions.push('cr.flagged = 1');
+  }
+  if (windowHours > 0) {
+    conditions.push('cm.created_at > ?');
+    params.push(Date.now() - windowHours * 3_600_000);
+  }
+  if (minLength > 0) {
+    conditions.push('LENGTH(cm.content) >= ?');
+    params.push(minLength);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
