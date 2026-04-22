@@ -6,4 +6,3 @@ data/
 *.db-journal
 *.log
 logs/
-.claude/
