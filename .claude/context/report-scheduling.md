@@ -2,7 +2,7 @@
 
 Key concerns:
 1. daily schedules
-2. monthly schedules
+2. weekly schedules
 3. manual triggers
 4. timezone assumptions
 5. cron reload behavior

@@ -4,7 +4,7 @@
 This repository is the World of Warships Discord reporting bot.
 
 It handles:
-1. daily and monthly reporting
+1. daily and weekly reporting
 2. Discord message indexing
 3. community pulse analysis
 4. slash commands
