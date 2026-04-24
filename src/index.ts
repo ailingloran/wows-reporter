@@ -16,6 +16,7 @@ import { startDashboard } from './dashboard/server';
 import { startMessageIndexer, backfillMessages } from './indexer/messageIndexer';
 import { startStaffTracker } from './staffTracker';
 import { startSpikeDetector, refreshSpikeChannels } from './alerts/spikeDetector';
+import { startBugTracker } from './bugTracker';
 import { config } from './config';
 import { logger } from './logger';
 
@@ -97,6 +98,9 @@ async function main() {
 
   // 7. Start real-time outage spike detector
   startSpikeDetector();
+
+  // 8. Start bug report tracker (forum thread listener + startup scan)
+  startBugTracker();
 
   logger.info('=== WoWS Reporter running. Waiting for scheduled events. ===');
 }

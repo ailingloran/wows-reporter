@@ -109,6 +109,13 @@ export async function publishFinalMonthlyReport(embed: EmbedBuilder, draftMsg: M
 // ── Button Interaction Handler ────────────────────────────────────────────────
 
 async function handleButtonInteraction(interaction: ButtonInteraction): Promise<void> {
+  // Route bug_* buttons to the bug tracker module
+  if (interaction.customId.startsWith('bug_')) {
+    const { handleBugButton } = await import('../bugTracker');
+    await handleBugButton(interaction);
+    return;
+  }
+
   if (interaction.customId === 'approve_monthly') {
     await interaction.deferReply({ ephemeral: true });
     try {

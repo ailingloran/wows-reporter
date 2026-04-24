@@ -33,6 +33,38 @@ const DEFAULTS: Record<string, string> = {
   spike_alert_cooldown_minutes: '45',
   spike_alert_min_users:        '5',
   compliance_watched_users:     '["282918131762987008","629846346244947971"]',
+
+  // ── Bug Report Tracker ──────────────────────────────────────────────────────
+  // bug_auto_message_enabled: standalone — posts instructions in every new
+  //   thread in the configured forum channels. Works without full tracking.
+  // bug_tracker_enabled: full workflow — tags, CM claim button, DB records,
+  //   reminders. Requires bug_cm_group_id and tags pre-created on Discord.
+  bug_auto_message_enabled:    'false',
+  bug_tracker_enabled:         'false',
+  bug_forum_channel_ids:       '',       // comma-separated Discord forum channel IDs
+  bug_notification_channel_id: '',       // staff channel for claim/reminder pings
+  bug_cm_group_id:             '',       // staff_groups.id (as string) of CM group
+  bug_reminder_days:           '2',      // days of CM inactivity before a reminder fires
+  bug_new_tag_name:            'NEW BUG',  // must exist on the forum channel
+  bug_claimed_tag_name:        'CLAIMED',  // must exist on the forum channel
+  bug_startup_scan_enabled:    'true',
+  bug_instructions_text:       [
+    '**How to report a bug:**',
+    '',
+    '• Review prior posts before creating a new one to avoid duplicate issues',
+    '• Create a new post:',
+    '  ○ Add a short title describing the bug/issue',
+    '  ○ Add relevant description of the bug',
+    '  ○ Add specific steps to recreate the bug',
+    '  ○ Add screenshots + video recording + replay when relevant',
+    '  ○ Add a WGCheck **(required)**',
+    '  ○ Select appropriate tag',
+    '• Click Post',
+    '',
+    'The Moderators reserve the right to lock posts which do not follow channel guidelines or are duplicates of previous reports.',
+    '',
+    '*Please ensure the bug is not related to installed mods before posting. Launch the game in safe mode and see if the problem persists.*',
+  ].join('\n'),
 };
 
 export function initSettings(): void {

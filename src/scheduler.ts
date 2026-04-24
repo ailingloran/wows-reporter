@@ -22,6 +22,7 @@ let weeklyPulseTask:   cron.ScheduledTask | null = null;
 let staffSnapshotTask: cron.ScheduledTask | null = null;
 let narrativeTask:     cron.ScheduledTask | null = null;
 let narrativeAiTask:   cron.ScheduledTask | null = null;
+let bugReminderTask:   cron.ScheduledTask | null = null;
 
 // ── Callbacks (named so they can be reused when rescheduling) ─────────────────
 
@@ -115,6 +116,18 @@ async function staffSnapshotCallback() {
   }
 }
 
+async function bugReminderCallback() {
+  if (getSetting('bug_tracker_enabled', 'false') !== 'true') return;
+  logger.info('[scheduler] Bug report reminder check triggered');
+  try {
+    const { runBugReminders } = await import('./bugTracker');
+    await runBugReminders();
+    logger.info('[scheduler] Bug report reminder check complete');
+  } catch (err) {
+    logger.error('[scheduler] Bug report reminder check failed:', err);
+  }
+}
+
 // ── Registration ──────────────────────────────────────────────────────────────
 
 export function registerSchedules(): void {
@@ -132,6 +145,10 @@ export function registerSchedules(): void {
   // AI Narrative Drift runs at 01:30 CET daily — skips if narrative_ai_enabled=false in settings.
   // To remove entirely: delete this line + narrativeAiCallback + narrativeAiDb.ts.
   narrativeAiTask = cron.schedule(`30 1 * * *`, narrativeAiCallback, { timezone: TZ });
+
+  // Bug report reminder check — 09:00 CET daily.
+  // Skips automatically when bug_tracker_enabled=false in settings.
+  bugReminderTask = cron.schedule('0 9 * * *', bugReminderCallback, { timezone: TZ });
 
   logger.info(
     `[scheduler] Daily at ${dh}:00, Community Pulse at ${sh}:00, ` +

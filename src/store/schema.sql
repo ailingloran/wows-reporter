@@ -255,3 +255,44 @@ CREATE INDEX IF NOT EXISTS idx_player_role_events_time
 
 CREATE INDEX IF NOT EXISTS idx_chat_jobs_created_at
   ON chat_jobs(created_at DESC);
+
+-- ── Bug Report Tracking ───────────────────────────────────────────────────────
+
+-- One row per forum thread tracked as a bug report.
+-- thread_id is the Discord thread/post snowflake ID (PRIMARY KEY).
+-- status: 'new' = unclaimed, 'claimed' = a CM has taken ownership.
+-- bot_message_id stores the ID of the bot's auto-posted instructions message
+-- so it can be edited when a CM claims the report.
+-- last_reminder_at and reminder_count track the nag cycle.
+-- CM activity for reminder logic is queried from staff_message_events
+-- (which already records thread_id for all tracked staff messages).
+
+CREATE TABLE IF NOT EXISTS bug_reports (
+  thread_id        TEXT    PRIMARY KEY,
+  forum_channel_id TEXT    NOT NULL,
+  title            TEXT    NOT NULL,
+  status           TEXT    NOT NULL DEFAULT 'new',
+  claimed_by_id    TEXT,
+  claimed_by_name  TEXT,
+  claimed_at       INTEGER,
+  bot_message_id   TEXT,
+  created_at       INTEGER NOT NULL,
+  last_reminder_at INTEGER,
+  reminder_count   INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_bug_reports_status
+  ON bug_reports(status, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_bug_reports_forum
+  ON bug_reports(forum_channel_id, created_at DESC);
+
+-- Per-CM Discord forum tag assignments.
+-- Only CMs explicitly mapped here receive a personal tag on claim.
+-- All claims always also receive the generic CLAIMED tag (bug_claimed_tag_name).
+-- user_id is the Discord user snowflake of the CM.
+-- tag_name must match a tag pre-created on the forum channel (case-insensitive lookup).
+CREATE TABLE IF NOT EXISTS bug_cm_tags (
+  user_id  TEXT PRIMARY KEY,
+  tag_name TEXT NOT NULL
+);

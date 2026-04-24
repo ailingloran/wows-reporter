@@ -26,10 +26,12 @@ import { createChatJob, getChatHistoryPage, getChatJobResponse, removeChatJob } 
 import {
   addRoleToGroup, addUserToGroup,
   getStaffActivity, getStaffActivityByMonth, getStaffActiveMonths, getStaffGroupConfig,
+  getStaffGroups,
   getWeeklySnapshots,
   removeRoleFromGroup, removeUserFromGroup,
   takeWeeklySnapshot,
 } from '../store/staffDb';
+import { getBugReports, deleteBugReport, getCmTags, upsertCmTag, deleteCmTag } from '../store/bugDb';
 import { invalidateStaffCache } from '../staffTracker';
 import { createToken, listTokens, revokeToken, verifyToken } from '../store/tokenDb';
 import {
@@ -777,6 +779,108 @@ app.post('/api/narrative-ai/reprocess', (req: Request, res: Response) => {
   reprocessNarrativeHistoryAI({ full, days }).catch(err =>
     logger.error('[dashboard] /api/narrative-ai/reprocess background error:', err),
   );
+});
+
+// ── Bug Report Tracker ────────────────────────────────────────────────────────
+
+app.get('/api/bugs/reports', (req: Request, res: Response) => {
+  try {
+    const status = req.query.status as string | undefined;
+    const limit  = Math.min(Math.max(Number(req.query.limit) || 100, 1), 500);
+    res.json(getBugReports({ status, limit }));
+  } catch (error) {
+    logger.error('[dashboard] GET /api/bugs/reports error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/bugs/settings', (req: Request, res: Response) => {
+  try {
+    const updates = req.body as Record<string, string>;
+    for (const [key, value] of Object.entries(updates)) {
+      if (key.startsWith('bug_')) setSetting(key, String(value));
+    }
+    // Reload in-memory channel set so changes take effect without restart
+    import('../bugTracker')
+      .then(({ refreshBugConfig }) => refreshBugConfig())
+      .catch(() => {/* tracker not started in CLI modes */});
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('[dashboard] POST /api/bugs/settings error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.get('/api/bugs/settings', (_req: Request, res: Response) => {
+  try {
+    const all = getAllSettings();
+    const bugSettings: Record<string, string> = {};
+    for (const [k, v] of Object.entries(all)) {
+      if (k.startsWith('bug_')) bugSettings[k] = v;
+    }
+    res.json({
+      settings: bugSettings,
+      groups:   getStaffGroups(),
+      guildId:  config.statbotGuildId,   // used by frontend to build Discord thread links
+    });
+  } catch (error) {
+    logger.error('[dashboard] GET /api/bugs/settings error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/bugs/reports/:threadId', (req: Request, res: Response) => {
+  try {
+    const ok = deleteBugReport(req.params.threadId);
+    res.json({ ok });
+  } catch (error) {
+    logger.error('[dashboard] DELETE /api/bugs/reports/:threadId error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ── CM tag map ────────────────────────────────────────────────────────────────
+
+app.get('/api/bugs/cm-tags', (_req: Request, res: Response) => {
+  try {
+    res.json(getCmTags());
+  } catch (error) {
+    logger.error('[dashboard] GET /api/bugs/cm-tags error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/bugs/cm-tags', (req: Request, res: Response) => {
+  try {
+    const { user_id, tag_name } = req.body as { user_id?: string; tag_name?: string };
+    if (!user_id?.trim() || !tag_name?.trim()) {
+      res.status(400).json({ error: 'user_id and tag_name are required' });
+      return;
+    }
+    upsertCmTag(user_id.trim(), tag_name.trim());
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('[dashboard] POST /api/bugs/cm-tags error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.delete('/api/bugs/cm-tags/:userId', (req: Request, res: Response) => {
+  try {
+    const ok = deleteCmTag(req.params.userId);
+    res.json({ ok });
+  } catch (error) {
+    logger.error('[dashboard] DELETE /api/bugs/cm-tags/:userId error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Triggers a startup scan on demand (e.g., after the bot was offline)
+app.post('/api/bugs/scan', (_req: Request, res: Response) => {
+  res.json({ ok: true, background: true });
+  import('../bugTracker')
+    .then(({ runStartupScan }) => runStartupScan())
+    .catch((err: unknown) => logger.error('[dashboard] Bug scan error:', err));
 });
 
 export function startDashboard(): void {
