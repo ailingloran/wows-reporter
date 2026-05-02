@@ -30,6 +30,7 @@ import {
 } from 'discord.js';
 import { getDiscordClient } from './api/discord';
 import { getSetting } from './store/settingsDb';
+import { config } from './config';
 import {
   type BugReportRow,
   claimBugReport,
@@ -94,7 +95,7 @@ async function resolveTagId(
 
 // ── Handle a new bug thread ───────────────────────────────────────────────────
 
-async function handleNewBugThread(thread: PublicThreadChannel): Promise<void> {
+async function handleNewBugThread(thread: PublicThreadChannel, silent = false): Promise<void> {
   const autoMsgOn  = getSetting('bug_auto_message_enabled', 'false') === 'true';
   const trackingOn = getSetting('bug_tracker_enabled',      'false') === 'true';
 
@@ -113,7 +114,8 @@ async function handleNewBugThread(thread: PublicThreadChannel): Promise<void> {
   }
 
   // ── Auto-message layer ──────────────────────────────────────────────────────
-  if (autoMsgOn) {
+  // Skipped in silent mode (startup scan backfill — don't post to old threads)
+  if (autoMsgOn && !silent) {
     const instructionsText = getSetting('bug_instructions_text', '');
     const embed = new EmbedBuilder()
       .setTitle('📋 How to Report a Bug')
@@ -150,8 +152,8 @@ async function handleNewBugThread(thread: PublicThreadChannel): Promise<void> {
     last_reminder_at: null,
   });
 
-  // Apply NEW BUG tag
-  if (forum) {
+  // Apply NEW BUG tag — skip in silent mode (don't retroactively tag old threads)
+  if (!silent && forum) {
     const newTagId = await resolveTagId(forum, getSetting('bug_new_tag_name', 'NEW BUG'));
     if (newTagId) {
       try {
@@ -169,20 +171,14 @@ async function handleNewBugThread(thread: PublicThreadChannel): Promise<void> {
     }
   }
 
-  // Notification in staff channel
+  // Notification in staff channel — skip in silent mode (startup scan backfill)
   const notifChannelId = getSetting('bug_notification_channel_id', '');
-  if (notifChannelId) {
+  if (!silent && notifChannelId) {
     try {
       const notifCh = await client.channels.fetch(notifChannelId);
       if (notifCh?.isTextBased()) {
         await (notifCh as TextChannel).send({
-          embeds: [
-            new EmbedBuilder()
-              .setTitle('🐛 New Bug Report')
-              .setDescription(`**[${thread.name}](https://discord.com/channels/${getSetting('bug_guild_id', '')}/${thread.id})**`)
-              .setColor(0xE67E22)
-              .setTimestamp(),
-          ],
+          content: `🐛 **New bug report** — **[${thread.name}](https://discord.com/channels/${thread.guildId}/${thread.id})**`,
         });
       }
     } catch (err) {
@@ -254,9 +250,8 @@ async function processTagClaim(
     try {
       const notifCh = await client.channels.fetch(notifChannelId);
       if (notifCh?.isTextBased()) {
-        const guildId = getSetting('bug_guild_id', '');
         await (notifCh as TextChannel).send({
-          content: `✅ **Bug report claimed** — <@${userId}> has taken **[${report.title}](https://discord.com/channels/${guildId}/${thread.id})**`,
+          content: `✅ **Bug report claimed** — <@${userId}> has taken **[${report.title}](https://discord.com/channels/${thread.guildId}/${thread.id})**`,
         });
       }
     } catch (err) {
@@ -291,8 +286,8 @@ export async function runBugReminders(): Promise<void> {
 
   logger.info(`[bugTracker] Reminder check: ${staleBugs.length} stale bug(s) found`);
 
-  const client     = getDiscordClient();
-  const guildId    = getSetting('bug_guild_id', '');
+  const client  = getDiscordClient();
+  const guildId = config.statbotGuildId;
 
   let notifCh: TextChannel | null = null;
   try {
@@ -347,7 +342,8 @@ async function runStartupScan(): Promise<void> {
       for (const [, thread] of threads) {
         if (!isThreadTracked(thread.id)) {
           found++;
-          await handleNewBugThread(thread as PublicThreadChannel).catch(err =>
+          // silent=true: backfill DB only, don't post messages or apply tags to old threads
+          await handleNewBugThread(thread as PublicThreadChannel, true).catch(err =>
             logger.error(`[bugTracker] Startup scan failed for thread ${thread.id}:`, err),
           );
         }
