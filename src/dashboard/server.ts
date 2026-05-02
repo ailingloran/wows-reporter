@@ -883,6 +883,15 @@ app.post('/api/bugs/scan', (_req: Request, res: Response) => {
     .catch((err: unknown) => logger.error('[dashboard] Bug scan error:', err));
 });
 
+// One-shot cleanup: finds 'new' threads that already have a CM personal tag
+// and processes them as claims (fixes double-tagged threads from startup scan spam)
+app.post('/api/bugs/cleanup', (_req: Request, res: Response) => {
+  res.json({ ok: true, background: true });
+  import('../bugTracker')
+    .then(({ runTagCleanup }) => runTagCleanup())
+    .catch((err: unknown) => logger.error('[dashboard] Bug cleanup error:', err));
+});
+
 export function startDashboard(): void {
   const server = app.listen(config.dashboardPort, () => {
     logger.info(`[dashboard] Listening on http://localhost:${config.dashboardPort}`);

@@ -356,6 +356,56 @@ async function runStartupScan(): Promise<void> {
   logger.info(`[bugTracker] Startup scan complete — ${scanned} thread(s) checked, ${found} new`);
 }
 
+// ── Tag cleanup (one-shot, callable from dashboard) ───────────────────────────
+// Finds tracked threads still marked 'new' that already have a CM personal tag
+// applied (e.g. from before the bot was configured) and processes them as claims.
+
+export async function runTagCleanup(): Promise<{ cleaned: number; skipped: number }> {
+  const client     = getDiscordClient();
+  const allCmTags  = getCmTags();
+  const newReports = getBugReports({ status: 'new', limit: 500 });
+
+  let cleaned = 0;
+  let skipped = 0;
+
+  logger.info(`[bugTracker] Tag cleanup: checking ${newReports.length} 'new' report(s)…`);
+
+  for (const report of newReports) {
+    try {
+      const thread = await client.channels.fetch(report.thread_id) as PublicThreadChannel;
+      if (!thread?.isThread()) { skipped++; continue; }
+
+      const forum = await client.channels.fetch(report.forum_channel_id) as ForumChannel;
+      if (!forum) { skipped++; continue; }
+
+      const freshForum = await forum.fetch() as ForumChannel;
+      const idToName   = new Map<string, string>();
+      for (const t of freshForum.availableTags) idToName.set(t.id, t.name.toLowerCase());
+
+      const appliedTagIds = thread.appliedTags ?? [];
+      let claimed = false;
+      for (const tagId of appliedTagIds) {
+        const tagName = idToName.get(tagId);
+        if (!tagName) continue;
+        const cmTag = allCmTags.find(r => r.tag_name.toLowerCase() === tagName);
+        if (!cmTag) continue;
+
+        await processTagClaim(thread, cmTag.user_id, report, freshForum);
+        cleaned++;
+        claimed = true;
+        break;
+      }
+      if (!claimed) skipped++;
+    } catch (err) {
+      logger.error(`[bugTracker] Cleanup failed for thread ${report.thread_id}:`, err);
+      skipped++;
+    }
+  }
+
+  logger.info(`[bugTracker] Tag cleanup complete — ${cleaned} fixed, ${skipped} skipped`);
+  return { cleaned, skipped };
+}
+
 // ── Dashboard helpers (exported for server.ts) ────────────────────────────────
 
 export { getBugReports, deleteBugReport };
