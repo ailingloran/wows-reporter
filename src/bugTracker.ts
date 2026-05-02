@@ -22,10 +22,7 @@
  */
 
 import {
-  ActionRowBuilder,
-  ButtonBuilder,
   ButtonInteraction,
-  ButtonStyle,
   EmbedBuilder,
   ForumChannel,
   PublicThreadChannel,
@@ -33,13 +30,13 @@ import {
 } from 'discord.js';
 import { getDiscordClient } from './api/discord';
 import { getSetting } from './store/settingsDb';
-import { getTrackedRoleMap, getTrackedUserMap } from './store/staffDb';
 import {
+  type BugReportRow,
   claimBugReport,
   deleteBugReport,
   getBugReport,
   getBugReports,
-  getCmTagMap,
+  getCmTags,
   getStaleClaimedBugs,
   isThreadTracked,
   recordReminder,
@@ -124,20 +121,8 @@ async function handleNewBugThread(thread: PublicThreadChannel): Promise<void> {
       .setColor(0x2E6DB4)
       .setFooter({ text: 'WoWS Bug Reports · Please follow these guidelines' });
 
-    const components: ActionRowBuilder<ButtonBuilder>[] = [];
-    if (trackingOn) {
-      components.push(
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`bug_claim:${thread.id}`)
-            .setLabel('🐛 Claim Bug')
-            .setStyle(ButtonStyle.Primary),
-        ),
-      );
-    }
-
     try {
-      const msg = await thread.send({ embeds: [embed], components });
+      const msg = await thread.send({ embeds: [embed] });
       if (trackingOn) {
         // Store bot_message_id so we can edit it when the report is claimed
         setBotMessageId(thread.id, msg.id);
@@ -208,114 +193,62 @@ async function handleNewBugThread(thread: PublicThreadChannel): Promise<void> {
   logger.info(`[bugTracker] Bug report tracked: "${thread.name}" (${thread.id})`);
 }
 
-// ── Claim button handler ──────────────────────────────────────────────────────
+// ── Claim button handler (legacy — button removed, kept for stale messages) ───
 
 export async function handleBugButton(interaction: ButtonInteraction): Promise<void> {
-  // customId format: "bug_claim:{threadId}"
-  const threadId = interaction.customId.split(':').slice(1).join(':');
+  await interaction.reply({
+    content: '⚠️ The claim button is no longer active. Apply your personal CM tag on the forum thread to claim a report.',
+    ephemeral: true,
+  });
+}
 
-  const report = getBugReport(threadId);
-  if (!report) {
-    await interaction.reply({ content: '❌ Bug report not found in tracker.', ephemeral: true });
-    return;
-  }
+// ── Tag-based claim processor ─────────────────────────────────────────────────
+// Called when a CM's personal tag is detected on a threadUpdate event.
 
-  if (report.claimed_by_id) {
-    await interaction.reply({
-      content: `⚠️ Already claimed by **${report.claimed_by_name}**.`,
-      ephemeral: true,
-    });
-    return;
-  }
+async function processTagClaim(
+  thread:  PublicThreadChannel,
+  userId:  string,
+  report:  BugReportRow,
+  forum:   ForumChannel,
+): Promise<void> {
+  const client = getDiscordClient();
 
-  // Verify the clicker is in the configured CM group
-  const cmGroupId = parseInt(getSetting('bug_cm_group_id', ''), 10);
-  if (!cmGroupId) {
-    await interaction.reply({
-      content: '❌ Bug tracker not configured (no CM group set). Contact an admin.',
-      ephemeral: true,
-    });
-    return;
-  }
-
-  const userId = interaction.user.id;
-  const userMap = getTrackedUserMap();
-  const roleMap = getTrackedRoleMap();
-
-  const memberRoles = interaction.member && 'roles' in interaction.member && interaction.member.roles
-    ? 'cache' in (interaction.member.roles as any)
-      ? [...(interaction.member.roles as any).cache.keys()] as string[]
-      : interaction.member.roles as string[]
-    : [];
-
-  const isDirectCm = userMap.get(userId) === cmGroupId;
-  const isRoleCm   = memberRoles.some(rid => roleMap.get(rid) === cmGroupId);
-
-  if (!isDirectCm && !isRoleCm) {
-    await interaction.reply({
-      content: '❌ Only Community Managers can claim bug reports.',
-      ephemeral: true,
-    });
-    return;
-  }
-
-  await interaction.deferReply({ ephemeral: true });
-
-  const displayName = interaction.member && 'displayName' in interaction.member
-    ? (interaction.member as any).displayName as string
-    : interaction.user.username;
+  // Resolve display name from guild membership
+  const member = await thread.guild.members.fetch(userId).catch(() => null);
+  const displayName = member?.displayName ?? userId;
 
   // Update DB
-  claimBugReport(threadId, userId, displayName);
+  claimBugReport(thread.id, userId, displayName);
 
-  // Swap tags: remove NEW BUG, apply CLAIMED
-  const client = getDiscordClient();
+  // Swap tags: remove NEW BUG, add CLAIMED (CM personal tag is already applied)
+  const newTagId     = await resolveTagId(forum, getSetting('bug_new_tag_name',     'NEW BUG'));
+  const claimedTagId = await resolveTagId(forum, getSetting('bug_claimed_tag_name', 'CLAIMED'));
+  const currentTags  = thread.appliedTags ?? [];
+  const updatedTags  = [
+    ...currentTags.filter(id => id !== newTagId),
+    ...(claimedTagId && !currentTags.includes(claimedTagId) ? [claimedTagId] : []),
+  ];
   try {
-    const thread = await client.channels.fetch(threadId) as PublicThreadChannel;
-    const forumCh = thread.parentId
-      ? await client.channels.fetch(thread.parentId) as ForumChannel
-      : null;
-
-    if (forumCh) {
-      const newTagName     = getSetting('bug_new_tag_name',    'NEW BUG');
-      const claimedTagName = getSetting('bug_claimed_tag_name', 'CLAIMED');
-      const [newTagId, claimedTagId] = await Promise.all([
-        resolveTagId(forumCh, newTagName),
-        resolveTagId(forumCh, claimedTagName),
-      ]);
-
-      const currentTags = thread.appliedTags ?? [];
-
-      // Look up a personal tag for this CM (may be undefined — not all CMs have one)
-      const cmTagName = getCmTagMap().get(userId);
-      const cmTagId   = cmTagName ? await resolveTagId(forumCh, cmTagName) : undefined;
-
-      const updatedTags = [
-        ...currentTags.filter(id => id !== newTagId),                                         // remove NEW BUG
-        ...(claimedTagId && !currentTags.includes(claimedTagId) ? [claimedTagId] : []),        // always add CLAIMED
-        ...(cmTagId      && !currentTags.includes(cmTagId)      ? [cmTagId]      : []),        // add CM personal tag if mapped
-      ];
-      await thread.setAppliedTags(updatedTags);
-    }
-
-    // Edit the bot's auto-message to reflect claimed status
-    if (report.bot_message_id) {
-      try {
-        const botMsg = await thread.messages.fetch(report.bot_message_id);
-        const claimedAt = new Date().toLocaleString('en-GB', { timeZone: 'Europe/Berlin' });
-        const updatedEmbed = EmbedBuilder.from(botMsg.embeds[0])
-          .setFooter({ text: `Claimed by ${displayName} · ${claimedAt} CET` })
-          .setColor(0x2ECC71);
-        await botMsg.edit({ embeds: [updatedEmbed], components: [] });
-      } catch (err) {
-        logger.warn(`[bugTracker] Could not edit auto-message for thread ${threadId}:`, err);
-      }
-    }
+    await thread.setAppliedTags(updatedTags);
   } catch (err) {
-    logger.error(`[bugTracker] Error during claim tag-swap for thread ${threadId}:`, err);
+    logger.error(`[bugTracker] Failed to swap tags on thread ${thread.id}:`, err);
   }
 
-  // Notify staff channel
+  // Edit the bot's auto-message footer
+  if (report.bot_message_id) {
+    try {
+      const botMsg = await thread.messages.fetch(report.bot_message_id);
+      const claimedAt = new Date().toLocaleString('en-GB', { timeZone: 'Europe/Berlin' });
+      const updatedEmbed = EmbedBuilder.from(botMsg.embeds[0])
+        .setFooter({ text: `Claimed by ${displayName} · ${claimedAt} CET` })
+        .setColor(0x2ECC71);
+      await botMsg.edit({ embeds: [updatedEmbed] });
+    } catch (err) {
+      logger.warn(`[bugTracker] Could not edit auto-message for thread ${thread.id}:`, err);
+    }
+  }
+
+  // Notification to staff channel (plain message so mentions ping)
   const notifChannelId = getSetting('bug_notification_channel_id', '');
   if (notifChannelId) {
     try {
@@ -323,15 +256,7 @@ export async function handleBugButton(interaction: ButtonInteraction): Promise<v
       if (notifCh?.isTextBased()) {
         const guildId = getSetting('bug_guild_id', '');
         await (notifCh as TextChannel).send({
-          embeds: [
-            new EmbedBuilder()
-              .setTitle('✅ Bug Report Claimed')
-              .setDescription(
-                `<@${userId}> claimed **[${report.title}](https://discord.com/channels/${guildId}/${threadId})**`,
-              )
-              .setColor(0x2ECC71)
-              .setTimestamp(),
-          ],
+          content: `✅ **Bug report claimed** — <@${userId}> has taken **[${report.title}](https://discord.com/channels/${guildId}/${thread.id})**`,
         });
       }
     } catch (err) {
@@ -339,8 +264,7 @@ export async function handleBugButton(interaction: ButtonInteraction): Promise<v
     }
   }
 
-  await interaction.editReply({ content: `✅ Bug report claimed. Good luck, ${displayName}!` });
-  logger.info(`[bugTracker] "${report.title}" (${threadId}) claimed by ${displayName} (${userId})`);
+  logger.info(`[bugTracker] "${report.title}" (${thread.id}) claimed by ${displayName} (${userId}) via tag`);
 }
 
 // ── Reminder check (called by daily cron) ─────────────────────────────────────
@@ -387,18 +311,11 @@ export async function runBugReminders(): Promise<void> {
 
     try {
       await notifCh!.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle('⏰ Bug Report Follow-up Reminder')
-            .setDescription(
-              `<@${bug.claimed_by_id}>, please follow up on ` +
-              `**[${bug.title}](${threadLink})**\n` +
-              `Claimed ${daysSinceClaim} day(s) ago with no activity in the thread.`,
-            )
-            .setColor(0xE74C3C)
-            .setFooter({ text: `Reminder #${bug.reminder_count + 1}` })
-            .setTimestamp(),
-        ],
+        content:
+          `⏰ <@${bug.claimed_by_id}> please follow up on ` +
+          `**[${bug.title}](${threadLink})** — ` +
+          `claimed ${daysSinceClaim} day(s) ago with no CM activity in the thread. ` +
+          `(Reminder #${bug.reminder_count + 1})`,
       });
       recordReminder(bug.thread_id);
       logger.info(`[bugTracker] Reminder sent for "${bug.title}" (${bug.thread_id})`);
@@ -471,6 +388,46 @@ export function startBugTracker(): void {
     await handleNewBugThread(fullThread as PublicThreadChannel).catch(err =>
       logger.error('[bugTracker] threadCreate handler error:', err),
     );
+  });
+
+  // Watch for CMs manually applying their personal tag — treat as a claim event
+  client.on('threadUpdate', async (oldThread, newThread) => {
+    if (getSetting('bug_tracker_enabled', 'false') !== 'true') return;
+    if (!bugForumChannelIds.has(newThread.parentId ?? '')) return;
+
+    const report = getBugReport(newThread.id);
+    if (!report || report.status === 'claimed') return;
+
+    // Find tag IDs that were just added in this update
+    const oldTagSet   = new Set((oldThread as PublicThreadChannel).appliedTags ?? []);
+    const addedTagIds = ((newThread as PublicThreadChannel).appliedTags ?? [])
+      .filter(id => !oldTagSet.has(id));
+    if (addedTagIds.length === 0) return;
+
+    try {
+      const forum = await client.channels.fetch(newThread.parentId!) as ForumChannel;
+
+      // Build tag id → name map from the forum channel
+      const freshForum = await forum.fetch() as ForumChannel;
+      const idToName = new Map<string, string>();
+      for (const t of freshForum.availableTags) {
+        idToName.set(t.id, t.name.toLowerCase());
+      }
+
+      // Check if any added tag matches a CM's personal tag
+      const allCmTags = getCmTags();
+      for (const tagId of addedTagIds) {
+        const tagName = idToName.get(tagId);
+        if (!tagName) continue;
+        const cmTag = allCmTags.find(r => r.tag_name.toLowerCase() === tagName);
+        if (!cmTag) continue;
+
+        await processTagClaim(newThread as PublicThreadChannel, cmTag.user_id, report, freshForum);
+        break; // one claim per update
+      }
+    } catch (err) {
+      logger.error(`[bugTracker] threadUpdate handler error for ${newThread.id}:`, err);
+    }
   });
 
   // Run startup scan after a short delay to ensure Discord client is fully ready

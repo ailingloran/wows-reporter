@@ -170,6 +170,7 @@ export function getStaleClaimedBugs(
   return getDb().prepare(`
     SELECT br.* FROM bug_reports br
     WHERE br.status = 'claimed'
+      AND br.claimed_at < @cutoffMs
       AND (br.last_reminder_at IS NULL OR br.last_reminder_at < @cutoffMs)
       AND NOT EXISTS (
         SELECT 1 FROM staff_message_events sme
