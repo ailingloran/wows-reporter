@@ -178,7 +178,13 @@ async function handleNewBugThread(thread: PublicThreadChannel, silent = false): 
       const notifCh = await client.channels.fetch(notifChannelId);
       if (notifCh?.isTextBased()) {
         await (notifCh as TextChannel).send({
-          content: `🐛 **New bug report** — **[${thread.name}](https://discord.com/channels/${thread.guildId}/${thread.id})**`,
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('🐛 New Bug Report')
+              .setDescription(`**[${thread.name}](https://discord.com/channels/${thread.guildId}/${thread.id})**`)
+              .setColor(0xE67E22)
+              .setTimestamp(),
+          ],
         });
       }
     } catch (err) {
@@ -251,7 +257,13 @@ async function processTagClaim(
       const notifCh = await client.channels.fetch(notifChannelId);
       if (notifCh?.isTextBased()) {
         await (notifCh as TextChannel).send({
-          content: `✅ **Bug report claimed** — <@${userId}> has taken **[${report.title}](https://discord.com/channels/${thread.guildId}/${thread.id})**`,
+          embeds: [
+            new EmbedBuilder()
+              .setTitle('✅ Bug Report Claimed')
+              .setDescription(`**[${report.title}](https://discord.com/channels/${thread.guildId}/${thread.id})**\nClaimed by <@${userId}>`)
+              .setColor(0x2ECC71)
+              .setTimestamp(),
+          ],
         });
       }
     } catch (err) {
