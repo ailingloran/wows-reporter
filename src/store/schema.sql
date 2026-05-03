@@ -296,3 +296,12 @@ CREATE TABLE IF NOT EXISTS bug_cm_tags (
   user_id  TEXT PRIMARY KEY,
   tag_name TEXT NOT NULL
 );
+
+-- ── Forum Response Monitor ────────────────────────────────────────────────────
+
+-- Tracks threads that have already been processed (notified or CM-responded)
+-- so the hourly check doesn't fire twice for the same thread.
+CREATE TABLE IF NOT EXISTS forum_monitor_done (
+  thread_id   TEXT    PRIMARY KEY,
+  resolved_at INTEGER NOT NULL
+);

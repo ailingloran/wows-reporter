@@ -22,7 +22,8 @@ let weeklyPulseTask:   cron.ScheduledTask | null = null;
 let staffSnapshotTask: cron.ScheduledTask | null = null;
 let narrativeTask:     cron.ScheduledTask | null = null;
 let narrativeAiTask:   cron.ScheduledTask | null = null;
-let bugReminderTask:   cron.ScheduledTask | null = null;
+let bugReminderTask:        cron.ScheduledTask | null = null;
+let forumMonitorTask:       cron.ScheduledTask | null = null;
 
 // ── Callbacks (named so they can be reused when rescheduling) ─────────────────
 
@@ -116,6 +117,15 @@ async function staffSnapshotCallback() {
   }
 }
 
+async function forumMonitorCallback() {
+  try {
+    const { runForumMonitorCheck } = await import('./forumMonitor');
+    await runForumMonitorCheck();
+  } catch (err) {
+    logger.error('[scheduler] Forum monitor check failed:', err);
+  }
+}
+
 async function bugReminderCallback() {
   if (getSetting('bug_tracker_enabled', 'false') !== 'true') return;
   logger.info('[scheduler] Bug report reminder check triggered');
@@ -149,6 +159,11 @@ export function registerSchedules(): void {
   // Bug report reminder check — 09:00 CET daily.
   // Skips automatically when bug_tracker_enabled=false in settings.
   bugReminderTask = cron.schedule('0 9 * * *', bugReminderCallback, { timezone: TZ });
+
+  // Forum response monitor — hourly Mon–Fri (Europe/Berlin = Prague).
+  // Monday's runs naturally catch threads created over the weekend.
+  // Skips automatically when forum_monitor_enabled=false in settings.
+  forumMonitorTask = cron.schedule('0 * * * 1-5', forumMonitorCallback, { timezone: TZ });
 
   logger.info(
     `[scheduler] Daily at ${dh}:00, Community Pulse at ${sh}:00, ` +

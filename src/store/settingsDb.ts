@@ -65,6 +65,16 @@ const DEFAULTS: Record<string, string> = {
     '',
     '*Please ensure the bug is not related to installed mods before posting. Launch the game in safe mode and see if the problem persists.*',
   ].join('\n'),
+
+  // ── Forum Response Monitor ──────────────────────────────────────────────────
+  // Checks configured forum channels hourly (Mon–Fri, Europe/Berlin).
+  // Fires an embed notification when a thread has had no CM response for
+  // forum_monitor_threshold_hours. Weekend threads are caught on Monday at 08:00.
+  forum_monitor_enabled:          'false',
+  forum_monitor_channel_ids:      '',   // comma-separated forum channel IDs to watch
+  forum_monitor_cm_role_id:       '',   // Discord role ID that counts as a CM response
+  forum_monitor_notif_channel_id: '',   // channel to post unanswered-thread notifications
+  forum_monitor_threshold_hours:  '5',  // hours before a thread is considered unanswered
 };
 
 export function initSettings(): void {

@@ -17,6 +17,7 @@ import { startMessageIndexer, backfillMessages } from './indexer/messageIndexer'
 import { startStaffTracker } from './staffTracker';
 import { startSpikeDetector, refreshSpikeChannels } from './alerts/spikeDetector';
 import { startBugTracker } from './bugTracker';
+import { startForumMonitor } from './forumMonitor';
 import { config } from './config';
 import { logger } from './logger';
 
@@ -101,6 +102,9 @@ async function main() {
 
   // 8. Start bug report tracker (forum thread listener + startup scan)
   startBugTracker();
+
+  // 9. Start forum response monitor (hourly check, Mon–Fri)
+  startForumMonitor();
 
   logger.info('=== WoWS Reporter running. Waiting for scheduled events. ===');
 }

@@ -892,6 +892,46 @@ app.post('/api/bugs/cleanup', (_req: Request, res: Response) => {
     .catch((err: unknown) => logger.error('[dashboard] Bug cleanup error:', err));
 });
 
+// ── Forum Response Monitor ────────────────────────────────────────────────────
+
+app.get('/api/forum-monitor/settings', (_req: Request, res: Response) => {
+  try {
+    const all = getAllSettings();
+    const settings: Record<string, string> = {};
+    for (const [k, v] of Object.entries(all)) {
+      if (k.startsWith('forum_monitor_')) settings[k] = v;
+    }
+    res.json({ settings });
+  } catch (error) {
+    logger.error('[dashboard] GET /api/forum-monitor/settings error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+app.post('/api/forum-monitor/settings', (req: Request, res: Response) => {
+  try {
+    const updates = req.body as Record<string, string>;
+    for (const [key, value] of Object.entries(updates)) {
+      if (key.startsWith('forum_monitor_')) setSetting(key, String(value));
+    }
+    import('../forumMonitor')
+      .then(({ refreshForumMonitorConfig }) => refreshForumMonitorConfig())
+      .catch(() => {/* not started in CLI modes */});
+    res.json({ ok: true });
+  } catch (error) {
+    logger.error('[dashboard] POST /api/forum-monitor/settings error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Trigger an on-demand check (runs in background)
+app.post('/api/forum-monitor/run', (_req: Request, res: Response) => {
+  res.json({ ok: true, background: true });
+  import('../forumMonitor')
+    .then(({ runForumMonitorCheck }) => runForumMonitorCheck())
+    .catch((err: unknown) => logger.error('[dashboard] Forum monitor run error:', err));
+});
+
 export function startDashboard(): void {
   const server = app.listen(config.dashboardPort, () => {
     logger.info(`[dashboard] Listening on http://localhost:${config.dashboardPort}`);
