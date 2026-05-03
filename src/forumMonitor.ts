@@ -7,8 +7,9 @@
  *
  * Schedule (registered in scheduler.ts):
  *   Runs hourly Mon–Fri at Europe/Berlin (= Prague) time.
- *   Skips Sat/Sun entirely — Monday's 08:00 run naturally picks up any
- *   weekend threads that went unanswered.
+ *   Skips Sat/Sun entirely.
+ *   On Monday, skips runs before 08:00 — the 08:00 run is the first one
+ *   of the week and picks up any weekend threads that went unanswered.
  *
  * Notifications are embeds (no pings).
  * Once a thread is notified, or a CM response is found, it is marked done
@@ -55,6 +56,21 @@ async function hasCmResponse(thread: PublicThreadChannel, cmRoleId: string): Pro
 
 export async function runForumMonitorCheck(): Promise<void> {
   if (getSetting('forum_monitor_enabled', 'false') !== 'true') return;
+
+  // On Mondays, hold off until 08:00 Prague time so the first run of the week
+  // catches the weekend backlog at a sensible hour rather than midnight.
+  const tzParts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Berlin',
+    weekday: 'short',
+    hour:    'numeric',
+    hour12:  false,
+  }).formatToParts(new Date());
+  const berlinDay  = tzParts.find(p => p.type === 'weekday')?.value ?? '';
+  const berlinHour = parseInt(tzParts.find(p => p.type === 'hour')?.value ?? '0', 10);
+  if (berlinDay === 'Mon' && berlinHour < 8) {
+    logger.info('[forumMonitor] Monday before 08:00 — skipping until morning run');
+    return;
+  }
 
   const cmRoleId       = getSetting('forum_monitor_cm_role_id',       '');
   const notifChannelId = getSetting('forum_monitor_notif_channel_id', '');
